@@ -104,6 +104,17 @@ func inkling2SpecExplicit(lookup func(string) (string, bool)) bool {
 	return set && strings.TrimSpace(v) != ""
 }
 
+// inkling2SpecLowBitKVDType reports whether dtype is a low-bit global KV mode
+// eligible for DSpark speculative decode verify and rollback.
+func inkling2SpecLowBitKVDType(dtype Inkling2KVDType) bool {
+	switch dtype {
+	case Inkling2KVFP8, Inkling2KVNVFP4, Inkling2KVAsym:
+		return true
+	default:
+		return false
+	}
+}
+
 // inkling2BackendSupportsSpecKV reports whether be supports speculative verify
 // over the given global-slot KV dtype (including Ready() checks).
 func inkling2BackendSupportsSpecKV(be compute.Backend, dtype Inkling2KVDType) bool {
@@ -128,6 +139,11 @@ func inkling2BackendSupportsSpecKV(be compute.Backend, dtype Inkling2KVDType) bo
 			return false
 		}
 		return inkling2BackendNVFP4KVErr(be) == nil
+	case Inkling2KVAsym:
+		if _, ok := be.(compute.Inkling2AsymKVDevice); !ok {
+			return false
+		}
+		return inkling2BackendAsymKVErr(be) == nil
 	default:
 		return false
 	}
@@ -158,6 +174,22 @@ func inkling2SpecWarnKVDisable() {
 	})
 }
 
+// verifyGraphEligible reports whether CUDA graph capture/replay is eligible for
+// speculative verify and rollback on s's active global KV dtype.
+func (s *inkling2Resident) verifyGraphEligible() bool {
+	if s == nil || !s.graph || s.hostRouting {
+		return false
+	}
+	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok {
+		return false
+	}
+	dtype := s.kvDType()
+	if dtype == Inkling2KVF16 {
+		return false
+	}
+	return inkling2GraphEligible(s.be, s.hostRouting, dtype, os.LookupEnv)
+}
+
 // enableSpec allocates the verify chunk state for up to depth drafted tokens.
 func (s *inkling2Resident) enableSpec(depth int) error {
 	if (s.kvHalf || s.kvFP8) && s.kvAutoHalf && s.pos == 0 && !inkling2BackendSupportsSpecKV(s.be, s.kvDType()) {
@@ -171,6 +203,9 @@ func (s *inkling2Resident) enableSpec(depth int) error {
 			beName = s.be.Name()
 		}
 		return fmt.Errorf("inkling2 spec: FAK_INKLING2_KV=%s has no speculative decode on backend %s; set FAK_INKLING2_SPEC=0 or unset FAK_INKLING2_KV", s.kvDType(), beName)
+	}
+	if s.be == nil {
+		return fmt.Errorf("inkling2 spec: no backend attached for batched verify ops")
 	}
 	if _, ok := s.be.(compute.Inkling2VerifyDevice); !ok || !s.batched {
 		return fmt.Errorf("inkling2 spec: backend %s has no batched verify ops", s.be.Name())
@@ -240,7 +275,7 @@ func (s *inkling2Resident) verify(tokens []int) ([]int, error) {
 	switch {
 	case *ready:
 		s.fail(vd.Ink2GraphLaunchSlot(slot))
-	case s.graph && s.verifyWarm && *warm:
+	case s.verifyGraphEligible() && s.verifyWarm && *warm:
 		if err := s.dev.Ink2GraphBegin(); err != nil {
 			if errors.Is(err, errors.ErrUnsupported) {
 				// a device without capture verifies eagerly, as step decodes
@@ -301,7 +336,7 @@ func (s *inkling2Resident) commitVerify(T, keep int) error {
 			ready = &s.tailKeepReady[T]
 		}
 		s.fail(s.dev.Ink2Write(s.verifyKeep, []float32{intBits(keep)}))
-		if !*ready && s.graph {
+		if !*ready && s.verifyGraphEligible() {
 			if err := s.dev.Ink2GraphBegin(); err == nil {
 				for slot := range s.hist {
 					s.fail(vd.Ink2PConvCommitDev(s.hist[slot], s.convLog[slot], s.verifyKeep, channels, past, past+T))
@@ -372,7 +407,7 @@ func inkling2ResidentSpecGreedyUntilContext(ctx context.Context, m *Inkling2Loop
 	if err := d.Observe(s, prompt, len(prompt)); err != nil {
 		return nil, st, err
 	}
-	if s.graph {
+	if s.verifyGraphEligible() {
 		// one full-width verify grows every batched scratch before the decode graph
 		// is captured; keep 0 rewinds it. Shorter widths warm and capture on first use.
 		warm := make([]int, depth+1)
