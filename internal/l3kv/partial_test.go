@@ -89,6 +89,36 @@ func TestLookupPartialMidCorruptBlock(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestLookupPartialNarrowsRecomputeToMissingBlocks(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	// 4 sub-block units (4 tokens each = 16 tokens total), smaller than a full 16-token KV block.
+	units := putPrefix(t, ctx, store, 4, 4, 4, 4)
+	// Drop sub-block 2 (tokens [8,12)) while keeping sub-blocks 0, 1, and interior tail 3.
+	store.mu.Lock()
+	delete(store.m, blockDigest(2))
+	store.mu.Unlock()
+
+	sum, err := LookupPartialGranular(ctx, store, units)
+	if err != nil {
+		t.Fatalf("LookupPartialGranular: %v", err)
+	}
+	if sum.PrefixMatched != 8 {
+		t.Fatalf("PrefixMatched=%d, want 8", sum.PrefixMatched)
+	}
+	if sum.LastInteriorMatchEnd != 16 {
+		t.Fatalf("LastInteriorMatchEnd=%d, want 16 (last interior hash match)", sum.LastInteriorMatchEnd)
+	}
+	if sum.ServablePositions != 12 || sum.RecomputePositions != 4 {
+		t.Fatalf("servable=%d recompute=%d, want 12 / 4 (narrowed to missing sub-block)", sum.ServablePositions, sum.RecomputePositions)
+	}
+	wantInvalid := []Range{{FirstBlock: 2, LastBlock: 2, From: 8, Positions: 4}}
+	if !reflect.DeepEqual(sum.InvalidRanges, wantInvalid) {
+		t.Fatalf("InvalidRanges=%+v, want %+v", sum.InvalidRanges, wantInvalid)
+	}
+}
+
 // TestLookupPartialAllGood proves the no-damage shape: every block intact
 // yields ONE servable range spanning the whole prefix and zero invalid ranges.
 func TestLookupPartialAllGood(t *testing.T) {
