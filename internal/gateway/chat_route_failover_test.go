@@ -482,3 +482,329 @@ func TestFailoverCompleteStreamRetriesPreChunkOnly(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=50ms
+func TestChatRouteFailoverContextOverflowProactive(t *testing.T) {
+	var primaryHits, smallFBHits, largeFBHits atomic.Int32
+	primary := newOpenAIUpstreamMock(t, http.StatusOK, "from-primary", nil, &primaryHits)
+	smallFB := newOpenAIUpstreamMock(t, http.StatusOK, "from-small-fb", nil, &smallFBHits)
+	largeFB := newOpenAIUpstreamMock(t, http.StatusOK, "from-large-fb", nil, &largeFBHits)
+	t.Setenv("TEST_LARGE_KEY", "sk-large")
+
+	roster := &modelroute.Roster{
+		Version: modelroute.RosterVersion,
+		Accounts: []modelroute.Account{
+			{ID: "local-gpu", Kind: modelroute.KindLocal, BaseURL: primary.URL + "/v1", ContextTokens: 100},
+			{ID: "local-small", Kind: modelroute.KindLocal, BaseURL: smallFB.URL + "/v1", ContextTokens: 100},
+			{ID: "cloud-large", Kind: modelroute.KindOpenAI, BaseURL: largeFB.URL + "/v1", CredEnv: "TEST_LARGE_KEY", ContextTokens: 4096},
+		},
+		Bindings: []modelroute.Binding{
+			{
+				Model:         "default",
+				Account:       "local-gpu",
+				UpstreamModel: "local-qwen",
+				Fallbacks: []modelroute.FallbackTarget{
+					{Account: "local-small", UpstreamModel: "local-qwen-small"},
+					{Account: "cloud-large", UpstreamModel: "gpt-4o"},
+				},
+			},
+		},
+	}
+
+	tracker := newRouteCircuitTracker(30*time.Second, nil)
+	srv := newTestFailoverGateway(t, roster, tracker)
+
+	longPrompt := strings.Repeat("word ", 200) // ~1000 chars -> ~250 estimated tokens > 100
+	payload, _ := json.Marshal(map[string]any{
+		"model":    "default",
+		"messages": []map[string]any{{"role": "user", "content": longPrompt}},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "from-large-fb") {
+		t.Fatalf("status=%d body=%s, want 200 from-large-fb", rec.Code, rec.Body.String())
+	}
+	if primaryHits.Load() != 0 || smallFBHits.Load() != 0 || largeFBHits.Load() != 1 {
+		t.Fatalf("hits primary=%d smallFB=%d largeFB=%d, want 0/0/1",
+			primaryHits.Load(), smallFBHits.Load(), largeFBHits.Load())
+	}
+	if cooling, _ := tracker.isCoolingDown("local-gpu"); cooling {
+		t.Fatalf("proactive context overflow must not put primary into circuit cooldown")
+	}
+	snap := tracker.snapshot()
+	if snap.accounts["local-gpu"].totalFailovers != 1 {
+		t.Fatalf("local-gpu totalFailovers=%d, want 1", snap.accounts["local-gpu"].totalFailovers)
+	}
+}
+
+// fak-test:runtime fast est=50ms
+func TestChatRouteFailoverContextOverflowReactive(t *testing.T) {
+	t.Run("context_length_exceeded_escalates_past_insufficient_fallback", func(t *testing.T) {
+		var primaryHits, sameFBHits, largeFBHits atomic.Int32
+		primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			primaryHits.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"This model's maximum context length is 8192 tokens.","type":"invalid_request_error","code":"context_length_exceeded"}}`))
+		}))
+		t.Cleanup(primary.Close)
+
+		sameFB := newOpenAIUpstreamMock(t, http.StatusOK, "from-same-fb", nil, &sameFBHits)
+		largeFB := newOpenAIUpstreamMock(t, http.StatusOK, "from-large-fb", nil, &largeFBHits)
+		t.Setenv("TEST_LARGE_KEY", "sk-large")
+
+		roster := &modelroute.Roster{
+			Version: modelroute.RosterVersion,
+			Accounts: []modelroute.Account{
+				{ID: "local-gpu", Kind: modelroute.KindLocal, BaseURL: primary.URL + "/v1", ContextTokens: 8192},
+				{ID: "local-same", Kind: modelroute.KindLocal, BaseURL: sameFB.URL + "/v1", ContextTokens: 8192},
+				{ID: "cloud-large", Kind: modelroute.KindOpenAI, BaseURL: largeFB.URL + "/v1", CredEnv: "TEST_LARGE_KEY", ContextTokens: 128000},
+			},
+			Bindings: []modelroute.Binding{
+				{
+					Model:         "default",
+					Account:       "local-gpu",
+					UpstreamModel: "local-qwen",
+					Fallbacks: []modelroute.FallbackTarget{
+						{Account: "local-same", UpstreamModel: "local-qwen-2"},
+						{Account: "cloud-large", UpstreamModel: "gpt-4o"},
+					},
+				},
+			},
+		}
+
+		tracker := newRouteCircuitTracker(30*time.Second, nil)
+		srv := newTestFailoverGateway(t, roster, tracker)
+		rec := postChatCompletion(t, srv.Handler(), "default")
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "from-large-fb") {
+			t.Fatalf("status=%d body=%s, want 200 from-large-fb", rec.Code, rec.Body.String())
+		}
+		if primaryHits.Load() == 0 || sameFBHits.Load() != 0 || largeFBHits.Load() != 1 {
+			t.Fatalf("hits primary=%d sameFB=%d largeFB=%d, want >=1/0/1",
+				primaryHits.Load(), sameFBHits.Load(), largeFBHits.Load())
+		}
+		if cooling, _ := tracker.isCoolingDown("local-gpu"); cooling {
+			t.Fatalf("context_length_exceeded must not put primary into circuit cooldown")
+		}
+		snap := tracker.snapshot()
+		if snap.accounts["local-gpu"].totalFailovers != 1 {
+			t.Fatalf("local-gpu totalFailovers=%d, want 1", snap.accounts["local-gpu"].totalFailovers)
+		}
+	})
+
+	t.Run("non_overflow_400_does_not_escalate", func(t *testing.T) {
+		var fallbackHits atomic.Int32
+		primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"invalid parameter","type":"invalid_request_error","code":"invalid_request"}}`))
+		}))
+		t.Cleanup(primary.Close)
+		fallback := newOpenAIUpstreamMock(t, http.StatusOK, "should-not-reach", nil, &fallbackHits)
+		t.Setenv("TEST_LARGE_KEY", "sk-large")
+
+		roster := &modelroute.Roster{
+			Version: modelroute.RosterVersion,
+			Accounts: []modelroute.Account{
+				{ID: "local-gpu", Kind: modelroute.KindLocal, BaseURL: primary.URL + "/v1", ContextTokens: 8192},
+				{ID: "cloud-large", Kind: modelroute.KindOpenAI, BaseURL: fallback.URL + "/v1", CredEnv: "TEST_LARGE_KEY", ContextTokens: 128000},
+			},
+			Bindings: []modelroute.Binding{
+				{
+					Model:         "default",
+					Account:       "local-gpu",
+					UpstreamModel: "local-qwen",
+					Fallbacks:     []modelroute.FallbackTarget{{Account: "cloud-large", UpstreamModel: "gpt-4o"}},
+				},
+			},
+		}
+
+		srv := newTestFailoverGateway(t, roster, nil)
+		rec := postChatCompletion(t, srv.Handler(), "default")
+		if rec.Code == http.StatusOK {
+			t.Fatalf("expected non-200 for non-overflow 400, got 200: %s", rec.Body.String())
+		}
+		if fallbackHits.Load() != 0 {
+			t.Fatalf("fallback hits=%d, want 0 for non-overflow 400", fallbackHits.Load())
+		}
+	})
+}
+
+// fak-test:runtime fast est=50ms
+func TestChatRouteFailoverContextOverflowLocalOnlyFailsClosed(t *testing.T) {
+	t.Run("proactive_local_only_refuses_remote_fallback", func(t *testing.T) {
+		var localHits, remoteHits atomic.Int32
+		localSrv := newOpenAIUpstreamMock(t, http.StatusOK, "local-ok", nil, &localHits)
+		remoteSrv := newOpenAIUpstreamMock(t, http.StatusOK, "remote-leak", nil, &remoteHits)
+
+		localPlanner, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), localSrv.URL+"/v1", "local-m", "")
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner local: %v", err)
+		}
+		remotePlanner, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), remoteSrv.URL+"/v1", "remote-m", "sk-remote")
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner remote: %v", err)
+		}
+
+		fp := &failoverPlanner{
+			requestedModel: "private",
+			residencyFloor: "local_only",
+			candidates: []failoverCandidate{
+				{
+					target:   modelroute.Target{Account: "local-gpu", Kind: modelroute.KindLocal, UpstreamModel: "local-m", ContextTokens: 100, ResidencyFloor: "local_only"},
+					planner:  localPlanner,
+					locality: localitySelfHosted,
+				},
+				{
+					target:   modelroute.Target{Account: "cloud-fb", Kind: modelroute.KindOpenAI, UpstreamModel: "remote-m", ContextTokens: 128000, ResidencyFloor: "local_only"},
+					planner:  remotePlanner,
+					locality: localityVendor,
+				},
+			},
+			circuit: newRouteCircuitTracker(30*time.Second, nil),
+		}
+
+		longPrompt := strings.Repeat("secret ", 150) // > 100 tokens
+		_, err = fp.Complete(context.Background(), []agent.Message{{Role: agent.RoleUser, Content: longPrompt}}, nil)
+		if err == nil || !strings.Contains(err.Error(), "RESIDENCY_FAILOVER_DENIED") {
+			t.Fatalf("err = %v, want RESIDENCY_FAILOVER_DENIED", err)
+		}
+		if localHits.Load() != 0 || remoteHits.Load() != 0 {
+			t.Fatalf("hits local=%d remote=%d, want 0/0", localHits.Load(), remoteHits.Load())
+		}
+	})
+
+	t.Run("reactive_local_only_refuses_remote_fallback", func(t *testing.T) {
+		var remoteHits atomic.Int32
+		localSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"context_length_exceeded","message":"maximum context length is 4096"}}`))
+		}))
+		t.Cleanup(localSrv.Close)
+		remoteSrv := newOpenAIUpstreamMock(t, http.StatusOK, "remote-leak", nil, &remoteHits)
+
+		localPlanner, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), localSrv.URL+"/v1", "local-m", "")
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner local: %v", err)
+		}
+		remotePlanner, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), remoteSrv.URL+"/v1", "remote-m", "sk-remote")
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner remote: %v", err)
+		}
+
+		fp := &failoverPlanner{
+			requestedModel: "private",
+			residencyFloor: "local_only",
+			candidates: []failoverCandidate{
+				{
+					target:   modelroute.Target{Account: "local-gpu", Kind: modelroute.KindLocal, UpstreamModel: "local-m", ContextTokens: 4096, ResidencyFloor: "local_only"},
+					planner:  localPlanner,
+					locality: localitySelfHosted,
+				},
+				{
+					target:   modelroute.Target{Account: "cloud-fb", Kind: modelroute.KindOpenAI, UpstreamModel: "remote-m", ContextTokens: 128000, ResidencyFloor: "local_only"},
+					planner:  remotePlanner,
+					locality: localityVendor,
+				},
+			},
+			circuit: newRouteCircuitTracker(30*time.Second, nil),
+		}
+
+		_, err = fp.Complete(context.Background(), []agent.Message{{Role: agent.RoleUser, Content: "short"}}, nil)
+		if err == nil || !strings.Contains(err.Error(), "RESIDENCY_FAILOVER_DENIED") {
+			t.Fatalf("err = %v, want RESIDENCY_FAILOVER_DENIED", err)
+		}
+		if remoteHits.Load() != 0 {
+			t.Fatalf("remote account was contacted (%d hits) despite local_only residency floor", remoteHits.Load())
+		}
+	})
+
+	t.Run("all_local_candidates_insufficient_returns_context_overflow", func(t *testing.T) {
+		var local1Hits, local2Hits atomic.Int32
+		local1 := newOpenAIUpstreamMock(t, http.StatusOK, "l1", nil, &local1Hits)
+		local2 := newOpenAIUpstreamMock(t, http.StatusOK, "l2", nil, &local2Hits)
+
+		p1, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), local1.URL+"/v1", "m1", "")
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner 1: %v", err)
+		}
+		p2, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), local2.URL+"/v1", "m2", "")
+		if err != nil {
+			t.Fatalf("NewProviderHTTPPlanner 2: %v", err)
+		}
+
+		fp := &failoverPlanner{
+			requestedModel: "private",
+			residencyFloor: "local_only",
+			candidates: []failoverCandidate{
+				{target: modelroute.Target{Account: "local-1", Kind: modelroute.KindLocal, UpstreamModel: "m1", ContextTokens: 100, ResidencyFloor: "local_only"}, planner: p1, locality: localitySelfHosted},
+				{target: modelroute.Target{Account: "local-2", Kind: modelroute.KindLocal, UpstreamModel: "m2", ContextTokens: 150, ResidencyFloor: "local_only"}, planner: p2, locality: localitySelfHosted},
+			},
+		}
+
+		longPrompt := strings.Repeat("secret ", 150) // > 150 tokens
+		_, err = fp.Complete(context.Background(), []agent.Message{{Role: agent.RoleUser, Content: longPrompt}}, nil)
+		if !errors.Is(err, agent.ErrContextOverflow) {
+			t.Fatalf("err = %v, want ErrContextOverflow", err)
+		}
+		if local1Hits.Load() != 0 || local2Hits.Load() != 0 {
+			t.Fatalf("hits local1=%d local2=%d, want 0/0", local1Hits.Load(), local2Hits.Load())
+		}
+	})
+}
+
+// fak-test:runtime fast est=50ms
+func TestChatRouteFailoverContextOverflowStream(t *testing.T) {
+	var primaryHits, largeHits atomic.Int32
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"context_length_exceeded","message":"maximum context length is 4096"}}`))
+	}))
+	t.Cleanup(primary.Close)
+
+	large := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		largeHits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"model\":\"fb\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"from-large-stream\"},\"finish_reason\":null}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(large.Close)
+
+	p1, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), primary.URL+"/v1", "local-m", "")
+	if err != nil {
+		t.Fatalf("NewProviderHTTPPlanner primary: %v", err)
+	}
+	p2, err := agent.NewProviderHTTPPlanner(string(agent.ProviderOpenAI), large.URL+"/v1", "large-m", "")
+	if err != nil {
+		t.Fatalf("NewProviderHTTPPlanner large: %v", err)
+	}
+
+	fp := &failoverPlanner{
+		requestedModel: "default",
+		candidates: []failoverCandidate{
+			{target: modelroute.Target{Account: "local-gpu", Kind: modelroute.KindLocal, UpstreamModel: "local-m", ContextTokens: 4096}, planner: p1, locality: localitySelfHosted},
+			{target: modelroute.Target{Account: "cloud-large", Kind: modelroute.KindOpenAI, UpstreamModel: "large-m", ContextTokens: 128000}, planner: p2, locality: localityVendor},
+		},
+		circuit: newRouteCircuitTracker(30*time.Second, nil),
+	}
+
+	var got strings.Builder
+	comp, err := fp.CompleteStream(context.Background(), func(d string) error { got.WriteString(d); return nil },
+		[]agent.Message{{Role: agent.RoleUser, Content: "short"}}, nil)
+	if err != nil {
+		t.Fatalf("CompleteStream err: %v", err)
+	}
+	if got.String() != "from-large-stream" || comp.Message.Content != "from-large-stream" {
+		t.Fatalf("streamed=%q content=%q, want from-large-stream", got.String(), comp.Message.Content)
+	}
+	if primaryHits.Load() == 0 || largeHits.Load() != 1 {
+		t.Fatalf("hits primary=%d large=%d, want >=1/1", primaryHits.Load(), largeHits.Load())
+	}
+}

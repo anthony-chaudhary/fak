@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -211,6 +212,56 @@ func isFailoverEligibleError(err error) bool {
 	return errors.As(err, &ne)
 }
 
+// isContextOverflowError reports whether err indicates the upstream rejected
+// the request because the prompt exceeded its context window, returning any
+// upstream-reported prompt token count when available.
+func isContextOverflowError(err error) (bool, int) {
+	if err == nil {
+		return false, 0
+	}
+	if errors.Is(err, agent.ErrContextOverflow) {
+		return true, 0
+	}
+	var ikce *agent.InKernelContextLengthError
+	if errors.As(err, &ikce) {
+		return true, ikce.PromptTokens
+	}
+	var coe *agent.ContextOverflowError
+	if errors.As(err, &coe) {
+		return true, 0
+	}
+	var use *agent.UpstreamStreamError
+	if errors.As(err, &use) {
+		if upstreamContextOverflowCodes[strings.ToLower(strings.TrimSpace(use.Code))] ||
+			isUpstreamContextOverflow(use.Message) {
+			return true, 0
+		}
+	}
+	var se *agent.UpstreamStatusError
+	if errors.As(err, &se) {
+		d := parseUpstream400(se.Body)
+		if d.ContextOverflow {
+			return true, d.PromptTokens
+		}
+	}
+	return false, 0
+}
+
+func contextRequiredTokens(currentMin, reportedPrompt, failedWindow int) int {
+	req := currentMin
+	if reportedPrompt > req {
+		req = reportedPrompt
+	}
+	if failedWindow > 0 && failedWindow+1 > req {
+		req = failedWindow + 1
+	}
+	return req
+}
+
+func estimatePromptTokens(messages []agent.Message, tools []agent.ToolDef) int {
+	return int(estimateServedTokenUsage(messages, tools, 0).InputTokens)
+}
+
 type failoverCandidate struct {
 	target   modelroute.Target
 	planner  agent.Planner
@@ -286,13 +337,30 @@ func (p *failoverPlanner) Complete(ctx context.Context, messages []agent.Message
 	if len(ordered) == 0 {
 		return nil, fmt.Errorf("gateway: chat route: no admitted candidates for model %q", p.requestedModel)
 	}
+	minContextTokens := estimatePromptTokens(messages, tools)
 	var lastErr error
+	var overflowFrom string
 	for i, cand := range ordered {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
+		if minContextTokens > 0 && !cand.target.FitsContext(minContextTokens) {
+			if overflowFrom == "" {
+				overflowFrom = cand.target.Account
+			}
+			continue
+		}
 		if err := p.checkResidency(cand); err != nil {
+			if lastErr != nil {
+				return nil, fmt.Errorf("%w (after upstream error: %v)", err, lastErr)
+			}
 			return nil, err
+		}
+		if overflowFrom != "" {
+			if p.circuit != nil {
+				p.circuit.recordFailover(overflowFrom, cand.target.Account)
+			}
+			overflowFrom = ""
 		}
 		comp, err := cand.planner.Complete(ctx, messages, tools, candidateSampleOpts(cand, opts, i+1 < len(ordered))...)
 		if err == nil {
@@ -302,6 +370,11 @@ func (p *failoverPlanner) Complete(ctx context.Context, messages []agent.Message
 			return comp, nil
 		}
 		lastErr = err
+		if overflow, reportedPrompt := isContextOverflowError(err); overflow {
+			minContextTokens = contextRequiredTokens(minContextTokens, reportedPrompt, cand.target.ContextTokens)
+			overflowFrom = cand.target.Account
+			continue
+		}
 		if !isFailoverEligibleError(err) {
 			return nil, err
 		}
@@ -317,6 +390,13 @@ func (p *failoverPlanner) Complete(ctx context.Context, messages []agent.Message
 				p.circuit.recordFailover(cand.target.Account, next.target.Account)
 			}
 		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	if overflowFrom != "" {
+		return nil, fmt.Errorf("%w: prompt (~%d tokens) exceeds context_tokens on all admitted candidates for model %q",
+			agent.ErrContextOverflow, minContextTokens, p.requestedModel)
 	}
 	return nil, lastErr
 }
@@ -335,18 +415,35 @@ func (p *failoverPlanner) CompleteStream(ctx context.Context, sink agent.StreamS
 	if len(ordered) == 0 {
 		return nil, fmt.Errorf("gateway: chat route: no admitted candidates for model %q", p.requestedModel)
 	}
+	minContextTokens := estimatePromptTokens(messages, tools)
 	var lastErr error
+	var overflowFrom string
 	for i, cand := range ordered {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
+		if minContextTokens > 0 && !cand.target.FitsContext(minContextTokens) {
+			if overflowFrom == "" {
+				overflowFrom = cand.target.Account
+			}
+			continue
+		}
 		if err := p.checkResidency(cand); err != nil {
+			if lastErr != nil {
+				return nil, fmt.Errorf("%w (after upstream error: %v)", err, lastErr)
+			}
 			return nil, err
 		}
 		sp, ok := cand.planner.(agent.StreamingPlanner)
 		if !ok || !sp.StreamingSupported() {
 			lastErr = agent.ErrStreamingUnsupported
 			continue
+		}
+		if overflowFrom != "" {
+			if p.circuit != nil {
+				p.circuit.recordFailover(overflowFrom, cand.target.Account)
+			}
+			overflowFrom = ""
 		}
 		var emitted atomic.Bool
 		var wrappedSink agent.StreamSink
@@ -367,7 +464,15 @@ func (p *failoverPlanner) CompleteStream(ctx context.Context, sink agent.StreamS
 			return comp, nil
 		}
 		lastErr = err
-		if emitted.Load() || !isFailoverEligibleError(err) {
+		if emitted.Load() {
+			return nil, err
+		}
+		if overflow, reportedPrompt := isContextOverflowError(err); overflow {
+			minContextTokens = contextRequiredTokens(minContextTokens, reportedPrompt, cand.target.ContextTokens)
+			overflowFrom = cand.target.Account
+			continue
+		}
+		if !isFailoverEligibleError(err) {
 			return nil, err
 		}
 		if p.circuit != nil {
@@ -382,6 +487,10 @@ func (p *failoverPlanner) CompleteStream(ctx context.Context, sink agent.StreamS
 				p.circuit.recordFailover(cand.target.Account, next.target.Account)
 			}
 		}
+	}
+	if lastErr == nil && overflowFrom != "" {
+		return nil, fmt.Errorf("%w: prompt (~%d tokens) exceeds context_tokens on all admitted candidates for model %q",
+			agent.ErrContextOverflow, minContextTokens, p.requestedModel)
 	}
 	if lastErr == nil {
 		return nil, agent.ErrStreamingUnsupported

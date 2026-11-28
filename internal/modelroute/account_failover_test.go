@@ -214,3 +214,65 @@ func TestResidencyFloorValidationAndPropagation(t *testing.T) {
 		}
 	})
 }
+
+func TestContextOverflowFallbackOverrideAndFitsContext(t *testing.T) {
+	accounts := []Account{
+		{ID: "local-1", Kind: KindLocal, BaseURL: "http://127.0.0.1:11434/v1", ContextTokens: 8192},
+		{ID: "fleet-1", Kind: KindFleet, BaseURL: "https://fleet.internal.example/v1", ContextTokens: 32768},
+		{ID: "openai-1", Kind: KindOpenAI, CredEnv: "OPENAI_API_KEY"},
+	}
+	r := Roster{
+		Version:  RosterVersion,
+		Accounts: accounts,
+		Bindings: []Binding{
+			{
+				Model:   "workhorse",
+				Account: "local-1",
+				Fallbacks: []FallbackTarget{
+					{Account: "fleet-1", ContextTokens: 65536},
+					{Account: "openai-1", ContextTokens: 128000},
+				},
+			},
+		},
+	}
+	raw := r.JSON()
+	parsed, err := ParseRoster(raw)
+	if err != nil {
+		t.Fatalf("ParseRoster failed: %v", err)
+	}
+	chain, err := parsed.ResolveChain("workhorse")
+	if err != nil {
+		t.Fatalf("ResolveChain failed: %v", err)
+	}
+	if len(chain) != 3 {
+		t.Fatalf("chain len = %d, want 3", len(chain))
+	}
+	if chain[0].ContextTokens != 8192 || chain[1].ContextTokens != 65536 || chain[2].ContextTokens != 128000 {
+		t.Fatalf("ContextTokens = [%d, %d, %d], want [8192, 65536, 128000]",
+			chain[0].ContextTokens, chain[1].ContextTokens, chain[2].ContextTokens)
+	}
+	if chain[0].FitsContext(9000) {
+		t.Fatalf("chain[0].FitsContext(9000) = true, want false")
+	}
+	if !chain[1].FitsContext(9000) || !chain[2].FitsContext(128000) {
+		t.Fatalf("expected chain[1] and chain[2] to fit 9000/128000 tokens")
+	}
+	if (Target{ContextTokens: 0}).FitsContext(9000) != true {
+		t.Fatalf("unspecified ContextTokens (0) should return true for FitsContext")
+	}
+
+	bad := Roster{
+		Version:  RosterVersion,
+		Accounts: accounts,
+		Bindings: []Binding{
+			{
+				Model:     "bad-ctx",
+				Account:   "local-1",
+				Fallbacks: []FallbackTarget{{Account: "openai-1", ContextTokens: -1}},
+			},
+		},
+	}
+	if err := bad.Validate(); err == nil {
+		t.Fatalf("Validate() succeeded for negative fallback context_tokens, want error")
+	}
+}

@@ -336,10 +336,11 @@ type Account struct {
 }
 
 // FallbackTarget names an ordered fallback account (and optional upstream model
-// override) on a Binding when the primary account cannot serve a request.
+// or context window override) on a Binding when the primary account cannot serve a request.
 type FallbackTarget struct {
 	Account       string `json:"account"`
 	UpstreamModel string `json:"upstream_model,omitempty"`
+	ContextTokens int    `json:"context_tokens,omitempty"`
 }
 
 // Binding maps ONE routed model id (a Plan member's Model, or a Plan's Scout) to the
@@ -408,6 +409,16 @@ type Target struct {
 	// ResidencyFloor propagates Binding.ResidencyFloor ("" | "any" | "local_only")
 	// to the resolved dispatch target.
 	ResidencyFloor string `json:"residency_floor,omitempty"`
+}
+
+// FitsContext reports whether this target's declared ContextTokens can
+// accommodate tokens. A zero ContextTokens (unspecified) or non-positive
+// token count returns true.
+func (t Target) FitsContext(tokens int) bool {
+	if tokens <= 0 || t.ContextTokens <= 0 {
+		return true
+	}
+	return tokens <= t.ContextTokens
 }
 
 // Admits reports whether the given tenant ISOLATION principal may dispatch through
@@ -600,7 +611,11 @@ func (r *Roster) ResolveChain(model string) ([]Target, error) {
 		if !ok {
 			return nil, fmt.Errorf("modelroute: model %q fallback binds to unknown account %q", model, fb.Account)
 		}
-		chain = append(chain, r.targetForAccount(model, fb.UpstreamModel, b.ResidencyFloor, a))
+		tgt := r.targetForAccount(model, fb.UpstreamModel, b.ResidencyFloor, a)
+		if fb.ContextTokens > 0 {
+			tgt.ContextTokens = fb.ContextTokens
+		}
+		chain = append(chain, tgt)
 	}
 	return chain, nil
 }
@@ -862,6 +877,9 @@ func validateBindingResidencyAndFallbacks(r Roster, b Binding, seen map[string]b
 		if fb.UpstreamModel != "" && strings.ContainsAny(fb.UpstreamModel, ": \t") {
 			return fmt.Errorf("modelroute: binding for model %q fallback %d has an upstream_model %q containing a route delimiter (: or space)",
 				b.Model, j, fb.UpstreamModel)
+		}
+		if fb.ContextTokens < 0 {
+			return fmt.Errorf("modelroute: binding for model %q fallback %d context_tokens must be non-negative", b.Model, j)
 		}
 		if b.ResidencyFloor == "local_only" {
 			fba, _ := r.account(fb.Account)
