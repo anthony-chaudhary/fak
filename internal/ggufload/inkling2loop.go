@@ -707,6 +707,15 @@ func Inkling2LoopPrefill(ctx context.Context, h *model.Inkling2LoopHost, tokens 
 // Inkling2LoopGreedy runs the host reference over prompt token IDs and returns
 // n greedily decoded token IDs.
 func Inkling2LoopGreedy(m *Inkling2LoopModel, prompt []int, n int) ([]int, error) {
+	return Inkling2LoopGreedyContext(context.Background(), m, prompt, n)
+}
+
+// Inkling2LoopGreedyContext runs the host reference over prompt token IDs with
+// cancellation support and returns n greedily decoded token IDs.
+func Inkling2LoopGreedyContext(ctx context.Context, m *Inkling2LoopModel, prompt []int, n int) ([]int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(prompt) == 0 {
 		return nil, fmt.Errorf("inkling2_loop: empty prompt")
 	}
@@ -714,7 +723,7 @@ func Inkling2LoopGreedy(m *Inkling2LoopModel, prompt []int, n int) ([]int, error
 	if err != nil {
 		return nil, err
 	}
-	logits, err := Inkling2LoopPrefill(context.Background(), h, prompt)
+	logits, err := Inkling2LoopPrefill(ctx, h, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -729,6 +738,9 @@ func Inkling2LoopGreedy(m *Inkling2LoopModel, prompt []int, n int) ([]int, error
 		out = append(out, best)
 		if len(out) == n {
 			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		logits, err = Inkling2LoopStep(h, best)
 		if err != nil {

@@ -244,13 +244,14 @@ type rawProperty struct {
 
 // CompiledGrammar holds structured metadata and the compiled EBNF output.
 type CompiledGrammar struct {
-	EBNF          string
-	Dialect       Dialect
-	VocabType     VocabType
-	ToolName      string
-	Discriminator string
-	Branches      []BranchDef
-	RuleCount     int
+	EBNF           string
+	Dialect        Dialect
+	VocabType      VocabType
+	ToolName       string
+	Discriminator  string
+	Branches       []BranchDef
+	RuleCount      int
+	IncludeToolTag bool
 }
 
 // Compile compiles a JSON Schema into a CompiledGrammar with structured metadata.
@@ -324,13 +325,14 @@ func Compile(schemaBytes []byte, opts GrammarOptions) (*CompiledGrammar, error) 
 	ebnf, ruleCount := generateEBNF(dialect, opts.VocabType, toolName, rootRule, discProp, branches, opts.IncludeToolTag, opts.Whitespace)
 
 	return &CompiledGrammar{
-		EBNF:          ebnf,
-		Dialect:       dialect,
-		VocabType:     opts.VocabType,
-		ToolName:      toolName,
-		Discriminator: discProp,
-		Branches:      branches,
-		RuleCount:     ruleCount,
+		EBNF:           ebnf,
+		Dialect:        dialect,
+		VocabType:      opts.VocabType,
+		ToolName:       toolName,
+		Discriminator:  discProp,
+		Branches:       branches,
+		RuleCount:      ruleCount,
+		IncludeToolTag: opts.IncludeToolTag,
 	}, nil
 }
 

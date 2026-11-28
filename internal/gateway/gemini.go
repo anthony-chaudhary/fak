@@ -206,7 +206,7 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	opts := []agent.SampleOpt{
 		agent.WithModel(model),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(temp),
+		agent.WithClientTemperature(temp),
 		agent.WithTopP(req.TopP),
 		agent.WithTopK(req.TopK),
 		agent.WithStop(req.StopSequences),

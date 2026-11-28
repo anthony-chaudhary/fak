@@ -114,10 +114,11 @@ type node struct {
 	chunkID       int    // physical backing page / allocation chunk identifier (0 = unassigned)
 	regimeKey     string // decode regime identifier under which this node's KV was produced
 
-	pinned    bool              // Tier 0 coordinator prompt: immune from eviction (seg = 3)
-	retention *RetentionRequest // client-declared per-request KV retention descriptor
-	tier      PriorityTier      // explicit priority tier (Tier0PinnedRoot .. Tier3Probationary)
-	tierSet   bool              // true if tier was explicitly assigned
+	pinned     bool              // Tier 0 coordinator prompt: immune from eviction (seg = 3)
+	holderRefs int               // live session coverage count (radix_refs.go); >0 is eviction-immune, independent of pinned
+	retention  *RetentionRequest // client-declared per-request KV retention descriptor
+	tier       PriorityTier      // explicit priority tier (Tier0PinnedRoot .. Tier3Probationary)
+	tierSet    bool              // true if tier was explicitly assigned
 
 	state     uint32        // lifecycle state (warm, computing prefill, failed, evicted); accessed atomically
 	ready     chan struct{} // completion broadcast for in-flight prefill promises
@@ -301,15 +302,16 @@ type Tree struct {
 	// (forEachRoot): the token budget is ONE global pool, only node IDENTITY is
 	// namespace-scoped. See namespace.go.
 	nsRoots              map[string]*node
-	maxTokens            int    // LRU budget in cached tokens; 0 disables eviction (unbounded)
-	maxSnapshotBytes     int64  // complete snapshot payload ceiling; 0 is unlimited
-	maxHostSnapshotBytes int64  // complete host-DRAM L2 payload ceiling; 0 disables L2
-	tokens               int    // total cached tokens = Σ len(node.key) over all nodes
-	snapshotBytes        int64  // hot complete snapshots plus their cached final logits
-	hostSnapshotBytes    int64  // complete PrefixSnapshot payloads physically owned by host DRAM
-	clock                uint64 // logical access clock
-	creationSeq          uint64 // node creation clock, independent of demand/warm recency
-	recordSeq            uint64 // monotonic, never-reused record incarnation sequence (#12848)
+	sessions             *sessionState // session-scoped refs; nil until first OpenSession
+	maxTokens            int           // LRU budget in cached tokens; 0 disables eviction (unbounded)
+	maxSnapshotBytes     int64         // complete snapshot payload ceiling; 0 is unlimited
+	maxHostSnapshotBytes int64         // complete host-DRAM L2 payload ceiling; 0 disables L2
+	tokens               int           // total cached tokens = Σ len(node.key) over all nodes
+	snapshotBytes        int64         // hot complete snapshots plus their cached final logits
+	hostSnapshotBytes    int64         // complete PrefixSnapshot payloads physically owned by host DRAM
+	clock                uint64        // logical access clock
+	creationSeq          uint64        // node creation clock, independent of demand/warm recency
+	recordSeq            uint64        // monotonic, never-reused record incarnation sequence (#12848)
 
 	l1Hits         int
 	l1Misses       int
@@ -667,6 +669,7 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		chunkID:       child.chunkID,
 		regimeKey:     child.regimeKey,
 		pinned:        child.pinned,
+		holderRefs:    child.holderRefs,
 		tier:          child.tier,
 		tierSet:       child.tierSet,
 	}

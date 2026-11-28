@@ -288,6 +288,9 @@ func (t *Tree) isNodePinnedOrImmuneAt(n *node, clock uint64) bool {
 	if n.pinned {
 		return true
 	}
+	if n.holderRefs > 0 {
+		return true
+	}
 	if n.tierSet && n.tier == Tier0PinnedRoot {
 		return true
 	}

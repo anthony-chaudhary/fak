@@ -561,6 +561,7 @@ func (t AuditTranscriptRow) clone() AuditTranscriptRow {
 		}
 	}
 	c.MutationChurnEvents = append([]QwenMutationChurn(nil), t.MutationChurnEvents...)
+	c.DegenerateCycleExemplars = append([]AuditDegenerateCycle(nil), t.DegenerateCycleExemplars...)
 	c.SourcePaths = append([]string(nil), t.SourcePaths...)
 	if t.TerminalFailureClasses != nil {
 		c.TerminalFailureClasses = make(map[string]int, len(t.TerminalFailureClasses))

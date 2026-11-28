@@ -50,12 +50,22 @@ const (
 	LoadIdle LoadVerdict = "IDLE"
 	// LoadError means a phase was considered and failed.
 	LoadError LoadVerdict = "ERROR"
+	// LoadSkipped means the tick skipped all phases under an active pause.
+	LoadSkipped LoadVerdict = "SKIPPED"
+	// LoadPressureRelief means only pressure-relief phases ran while
+	// deferrable phases were skipped under pressure (#14478).
+	LoadPressureRelief LoadVerdict = "PRESSURE_RELIEF"
+	// LoadPressureReliefOnly means deferrable junkwork was skipped under
+	// pressure while pressure-relief phases ran (#14477).
+	LoadPressureReliefOnly LoadVerdict = "PRESSURE_RELIEF_ONLY"
+	// LoadUnknown means the host sample was unreadable (#14478).
+	LoadUnknown LoadVerdict = "UNKNOWN"
 )
 
 // ValidLoadVerdict reports whether v is a member of the closed verdict vocabulary.
 func ValidLoadVerdict(v LoadVerdict) bool {
 	switch v {
-	case LoadProductive, LoadIdle, LoadError:
+	case LoadProductive, LoadIdle, LoadError, LoadSkipped, LoadPressureRelief, LoadPressureReliefOnly, LoadUnknown:
 		return true
 	}
 	return false
@@ -68,10 +78,12 @@ func ValidLoadVerdict(v LoadVerdict) bool {
 // operator has to be able to see. Ran therefore means "this tick considered the
 // phase", and Mutated is the separate question of whether it did anything.
 type PhaseLoad struct {
-	Phase   string `json:"phase"`
-	Ran     bool   `json:"ran"`
-	WallMS  int64  `json:"wall_ms"`
-	Mutated bool   `json:"mutated"`
+	Phase       string `json:"phase"`
+	Ran         bool   `json:"ran"`
+	WallMS      int64  `json:"wall_ms"`
+	Mutated     bool   `json:"mutated"`
+	Deferrable  bool   `json:"deferrable,omitempty"`
+	PhaseAction string `json:"phase_action,omitempty"`
 	// Skipped is each host-reaching step the phase declined because the engine
 	// was not granted that reach, so a confined tick is visible, not silent.
 	Skipped []ScopeSkip `json:"skipped,omitempty"`
@@ -90,11 +102,112 @@ type LoadCycle struct {
 	HaveCPU    bool    `json:"have_cpu"`
 	// SelfCPUMillis is the CPU time the tick itself consumed. Zero with
 	// HaveCPU=false means "unmeasured", never "free".
-	SelfCPUMillis int64       `json:"self_cpu_ms"`
-	HaveSelfCPU   bool        `json:"have_self_cpu"`
-	Phases        []PhaseLoad `json:"phases"`
-	Mutations     int         `json:"mutations"`
-	Verdict       LoadVerdict `json:"verdict"`
+	SelfCPUMillis int64            `json:"self_cpu_ms"`
+	HaveSelfCPU   bool             `json:"have_self_cpu"`
+	Phases        []PhaseLoad      `json:"phases"`
+	Mutations     int              `json:"mutations"`
+	Verdict       LoadVerdict      `json:"verdict"`
+	PauseAction   string           `json:"pause_action,omitempty"`
+	ReasonClass   PauseReasonClass `json:"reason_class,omitempty"`
+	TriggerValue  string           `json:"trigger_value,omitempty"`
+	Host          *HostLoad        `json:"host,omitempty"`
+}
+
+// HostSampleState is the closed three-way availability state for a host
+// pressure reading on an ops tick (#14475).
+type HostSampleState string
+
+const (
+	// HostSampleMeasured means RAM (and optionally swap/PSI) was read cleanly.
+	HostSampleMeasured HostSampleState = "MEASURED"
+	// HostSampleUnknown means the host sampler could not observe RAM (e.g.
+	// HaveRAM=false on an unsupported platform), which is not host pressure.
+	HostSampleUnknown HostSampleState = "UNKNOWN"
+	// HostSampleError means the host sampler failed or returned corrupted data.
+	HostSampleError HostSampleState = "ERROR"
+)
+
+// ValidHostSampleState reports whether s is a member of the closed host state vocabulary.
+func ValidHostSampleState(s HostSampleState) bool {
+	switch s {
+	case HostSampleMeasured, HostSampleUnknown, HostSampleError:
+		return true
+	}
+	return false
+}
+
+// HostLoad records the host-pressure snapshot sampled once per ops tick (#14475).
+type HostLoad struct {
+	State          HostSampleState `json:"state"`
+	TotalRAMBytes  uint64          `json:"total_ram_bytes,omitempty"`
+	AvailRAMBytes  uint64          `json:"avail_ram_bytes,omitempty"`
+	HaveRAM        bool            `json:"have_ram,omitempty"`
+	TotalSwapBytes uint64          `json:"total_swap_bytes,omitempty"`
+	AvailSwapBytes uint64          `json:"avail_swap_bytes,omitempty"`
+	HaveSwap       bool            `json:"have_swap,omitempty"`
+	PSIAvg10       float64         `json:"psi_avg10,omitempty"`
+	PSIAvg60       float64         `json:"psi_avg60,omitempty"`
+	PSIAvg300      float64         `json:"psi_avg300,omitempty"`
+	PSISomeTotalMS int64           `json:"psi_some_total_ms,omitempty"`
+	PSIFullTotalMS int64           `json:"psi_full_total_ms,omitempty"`
+	HavePSI        bool            `json:"have_psi,omitempty"`
+	Error          string          `json:"error,omitempty"`
+}
+
+// HostSampler reads a point-in-time host pressure sample for an ops tick (#14475).
+type HostSampler interface {
+	SampleHost() (harnessres.HostSample, error)
+}
+
+// HarnessHostSampler delegates host pressure sampling to internal/harnessres.
+type HarnessHostSampler struct{}
+
+// SampleHost reads the host's RAM, swap, and PSI pressure via harnessres.ReadHostSample.
+func (HarnessHostSampler) SampleHost() (harnessres.HostSample, error) {
+	return harnessres.ReadHostSample(), nil
+}
+
+// classifyHostSample maps a raw harnessres.HostSample and error into the three-way
+// HostLoad representation so "unknown" is never conflated with "busy" or "error".
+func classifyHostSample(sample harnessres.HostSample, err error) *HostLoad {
+	if err != nil {
+		return &HostLoad{
+			State: HostSampleError,
+			Error: err.Error(),
+		}
+	}
+	if sample.Corrupted {
+		return &HostLoad{
+			State: HostSampleError,
+			Error: "corrupted host sample",
+		}
+	}
+	if !sample.HaveRAM {
+		return &HostLoad{
+			State: HostSampleUnknown,
+		}
+	}
+	if sample.TotalRAMBytes == 0 || sample.AvailRAMBytes > sample.TotalRAMBytes || (sample.HaveSwap && sample.AvailSwapBytes > sample.TotalSwapBytes) {
+		return &HostLoad{
+			State: HostSampleError,
+			Error: "invalid host memory bounds",
+		}
+	}
+	return &HostLoad{
+		State:          HostSampleMeasured,
+		TotalRAMBytes:  sample.TotalRAMBytes,
+		AvailRAMBytes:  sample.AvailRAMBytes,
+		HaveRAM:        sample.HaveRAM,
+		TotalSwapBytes: sample.TotalSwapBytes,
+		AvailSwapBytes: sample.AvailSwapBytes,
+		HaveSwap:       sample.HaveSwap,
+		PSIAvg10:       sample.PSIAvg10,
+		PSIAvg60:       sample.PSIAvg60,
+		PSIAvg300:      sample.PSIAvg300,
+		PSISomeTotalMS: sample.PSISomeTotal.Milliseconds(),
+		PSIFullTotalMS: sample.PSIFullTotal.Milliseconds(),
+		HavePSI:        sample.HavePSI,
+	}
 }
 
 // Validate enforces the row's own contract so a malformed cycle is refused at
@@ -108,6 +221,9 @@ func (c LoadCycle) Validate() error {
 	}
 	if !ValidLoadVerdict(c.Verdict) {
 		return fmt.Errorf("ops load: verdict %q is outside the closed vocabulary", c.Verdict)
+	}
+	if c.Host != nil && !ValidHostSampleState(c.Host.State) {
+		return fmt.Errorf("ops load: host state %q is outside the closed vocabulary", c.Host.State)
 	}
 	if c.WallMS < 0 || c.SelfCPUMillis < 0 {
 		return fmt.Errorf("ops load: negative duration")

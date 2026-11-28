@@ -10,8 +10,8 @@ import (
 
 func TestInkling2ServeStatusAndMetrics(t *testing.T) {
 	srv, err := New(Config{
-		EngineID: "mock",
 		Model:    "inkling2-test",
+		EngineID: "inkernel",
 		ServeStatusProvider: func() ServeStatusSnapshot {
 			return ServeStatusSnapshot{
 				MaxCtx:                  32768,

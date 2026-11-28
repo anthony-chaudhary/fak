@@ -2767,3 +2767,24 @@ Inkling2ResidentFitCtx computes the largest resident Inkling-2 global context th
 inkling2SlotLayer maps a looped Inkling-2 KV cache slot index (across prelude, repeated core passes, and epilogue) back to its underlying physical transformer layer index.
 
 **Distinct from:** The slot-to-layer index mapper for Inkling-2's looped KV cache - not NativeSessionLifecycle (the scheduler session origin enum) and not inkling2PrefixCacheFromEnv (the serve prefix-slot pool).
+
+
+### Inkling2LoopDrafter
+
+Per-turn Inkling-2 decode interface supplying deterministic forced-tool continuation token IDs from toolgrammar.ForcedDraft.
+
+**Distinct from:** Supplies deterministic continuation tokens from a grammar state, unlike Inkling2LoopPrefill (KV batch execution) or OpenInkling2Loop (weight loading).
+
+
+### Inkling2LoopDraftGenerator
+
+Optional capability interface on an Inkling-2 loop engine running greedy or sampled decode with an Inkling2LoopDrafter through batched Prefill.
+
+**Distinct from:** Engine execution seam accepting Inkling2LoopDrafter alongside sampling hooks, unlike Inkling2LoopDrafter itself or OpenInkling2Loop (weight loading).
+
+
+### MaxResidentCtx
+
+MaxResidentCtx is the hard upper-bound resident global KV context on ModelMemoryBudget consumed by the model-agnostic ServeEnvelope solver, clamping resolved context tokens below backend capacity limits.
+
+**Distinct from:** The model-agnostic backend hard resident context ceiling in ModelMemoryBudget - not Inkling2AutoCtxCeiling (the default auto-fit cap) and not Inkling2ResidentFitCtx (the live free-VRAM fit calculation).

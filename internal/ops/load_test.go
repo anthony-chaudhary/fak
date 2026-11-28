@@ -2,10 +2,13 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/harnessres"
 )
 
 // fixedClock returns a clock the test advances explicitly, so the tick's
@@ -264,4 +267,130 @@ func TestLoadLedgerRefusesOutOfVocabularyVerdict(t *testing.T) {
 	if got, err := led.Count(); err != nil || got != 1 {
 		t.Fatalf("Count = %d, err = %v; want 1, nil", got, err)
 	}
+}
+
+type fakeHostSampler struct {
+	sample harnessres.HostSample
+	err    error
+	calls  int
+}
+
+func (f *fakeHostSampler) SampleHost() (harnessres.HostSample, error) {
+	f.calls++
+	return f.sample, f.err
+}
+
+// TestHostSampleSeam pins the injectable host-load sampler seam (#14475):
+// MEASURED carries RAM/PSI through into fak-ops-load/1, UNKNOWN and ERROR are
+// distinguishable from MEASURED and from each other, each tick samples once,
+// and the real harnessres reader does not panic on the host OS.
+func TestHostSampleSeam(t *testing.T) {
+	repo := t.TempDir()
+	engine := newHermeticTestEngine(t, repo)
+	engine.SetSelfCostFunc(func() (time.Duration, bool) { return 10 * time.Millisecond, true })
+
+	clock, advance := fixedClock(time.Date(2026, 11, 27, 8, 0, 0, 0, time.UTC))
+	engine.SetClock(clock)
+	ctx := context.Background()
+
+	// 1. MEASURED: fake RAM/PSI values propagate into fak-ops-load/1, sampled once.
+	measured := &fakeHostSampler{
+		sample: harnessres.HostSample{
+			TotalRAMBytes: 64 << 30,
+			AvailRAMBytes: 16 << 30,
+			HaveRAM:       true,
+			PSIAvg10:      4.5,
+			PSIAvg60:      2.0,
+			PSIAvg300:     1.0,
+			PSISomeTotal:  150 * time.Millisecond,
+			PSIFullTotal:  25 * time.Millisecond,
+			HavePSI:       true,
+		},
+	}
+	engine.SetHostSampler(measured)
+	if err := engine.Tick(ctx, false); err != nil {
+		t.Fatalf("tick 1 (MEASURED): %v", err)
+	}
+	if measured.calls != 1 {
+		t.Fatalf("expected 1 host sample per tick, got %d", measured.calls)
+	}
+
+	// 2. UNKNOWN: HaveRAM=false without an error is UNKNOWN, not MEASURED or ERROR.
+	advance(2 * time.Minute)
+	unknown := &fakeHostSampler{
+		sample: harnessres.HostSample{HaveRAM: false},
+	}
+	engine.SetHostSampler(unknown)
+	if err := engine.Tick(ctx, false); err != nil {
+		t.Fatalf("tick 2 (UNKNOWN): %v", err)
+	}
+	if unknown.calls != 1 {
+		t.Fatalf("expected 1 host sample per tick, got %d", unknown.calls)
+	}
+
+	// 3. ERROR: reader error is ERROR, distinct from UNKNOWN and MEASURED.
+	advance(2 * time.Minute)
+	errored := &fakeHostSampler{
+		err: errors.New("procfs unavailable"),
+	}
+	engine.SetHostSampler(errored)
+	if err := engine.Tick(ctx, false); err != nil {
+		t.Fatalf("tick 3 (ERROR): %v", err)
+	}
+	if errored.calls != 1 {
+		t.Fatalf("expected 1 host sample per tick, got %d", errored.calls)
+	}
+
+	cycles, err := engine.LoadLedger.Read()
+	if err != nil {
+		t.Fatalf("read load ledger: %v", err)
+	}
+	if len(cycles) != 3 {
+		t.Fatalf("expected 3 cycles, got %d", len(cycles))
+	}
+
+	h0 := cycles[0].Host
+	if h0 == nil || h0.State != HostSampleMeasured {
+		t.Fatalf("cycle 0 host = %+v, want state %q", h0, HostSampleMeasured)
+	}
+	if !h0.HaveRAM || h0.TotalRAMBytes != 64<<30 || h0.AvailRAMBytes != 16<<30 {
+		t.Errorf("cycle 0 RAM mismatch: %+v", h0)
+	}
+	if !h0.HavePSI || h0.PSIAvg10 != 4.5 || h0.PSIAvg60 != 2.0 || h0.PSIAvg300 != 1.0 || h0.PSISomeTotalMS != 150 || h0.PSIFullTotalMS != 25 {
+		t.Errorf("cycle 0 PSI mismatch: %+v", h0)
+	}
+
+	h1 := cycles[1].Host
+	if h1 == nil || h1.State != HostSampleUnknown {
+		t.Fatalf("cycle 1 host = %+v, want state %q", h1, HostSampleUnknown)
+	}
+	if h1.Error != "" {
+		t.Errorf("cycle 1 UNKNOWN must not carry error string, got %q", h1.Error)
+	}
+
+	h2 := cycles[2].Host
+	if h2 == nil || h2.State != HostSampleError {
+		t.Fatalf("cycle 2 host = %+v, want state %q", h2, HostSampleError)
+	}
+	if h2.Error == "" {
+		t.Errorf("cycle 2 ERROR must carry diagnostic error")
+	}
+
+	// Out-of-vocabulary host state is rejected at write time.
+	bad := LoadCycle{
+		Schema:  LoadSchemaV1,
+		Tick:    4,
+		Verdict: LoadIdle,
+		Host:    &HostLoad{State: HostSampleState("STRUGGLING")},
+	}
+	if err := engine.LoadLedger.Record(bad); err == nil {
+		t.Fatalf("expected out-of-vocabulary host state to be refused")
+	}
+
+	// 4. Real harnessres smoke call must not panic on the host OS.
+	realSample, realErr := (HarnessHostSampler{}).SampleHost()
+	if realErr != nil {
+		t.Fatalf("HarnessHostSampler.SampleHost returned unexpected error: %v", realErr)
+	}
+	_ = realSample
 }

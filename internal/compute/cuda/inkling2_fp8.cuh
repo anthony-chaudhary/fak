@@ -101,6 +101,30 @@ static __device__ __forceinline__ uint32_t ink2_e4m3fn_decode2_scaled_h2(uint16_
 #endif
 }
 
+// Ceiling OCP E4M3FN encode: returns smallest representable E4M3FN >= x (clamped to 448.0f).
+static __device__ __forceinline__ uint8_t ink2_e4m3fn_ceil_encode(float x) {
+  uint8_t c = ink2_e4m3fn_encode(x);
+  if (c != 0x7Eu && c != 0xFEu && ink2_e4m3fn_decode(c) < x) {
+    ++c;
+  }
+  return c;
+}
+
+// OCP MXFP8 UE8M0 ceiling power-of-2 scale encode/decode (0 = zero block, 1..254 = 2^(e-127)).
+static __device__ __forceinline__ uint8_t ink2_ue8m0_ceil_encode(float need) {
+  if (!(need > 0.f) || !isfinite(need)) return 0u;
+  uint32_t bits = __float_as_uint(need);
+  uint32_t exp = (bits >> 23) & 0xffu;
+  if ((bits & 0x7fffffu) != 0u && exp < 254u) ++exp;
+  if (exp == 0u) exp = 1u;
+  if (exp > 254u) exp = 254u;
+  return (uint8_t)exp;
+}
+
+static __device__ __forceinline__ float ink2_ue8m0_decode(uint8_t e) {
+  return e == 0u ? 0.f : __uint_as_float((uint32_t)e << 23);
+}
+
 static __device__ __forceinline__ float ink2_kv_f(uint8_t x) { return ink2_e4m3fn_decode(x); }
 
 template <class T>

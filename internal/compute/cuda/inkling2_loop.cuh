@@ -917,6 +917,7 @@ static __device__ __forceinline__ void ink2_put_k_nvfp4(uint8_t *dst, uint8_t *s
 }
 
 // ink2_put_v_nvfp4: same fp32 conv + RMS norm as ink2_put_v, then block-16 E2M1 + E4M3FN scales.
+template <bool FwhtV = false>
 static __device__ __forceinline__ void ink2_put_v_nvfp4(uint8_t *dst, uint8_t *scaleDst, int *overflow, const float *v,
                                                         const Ink2KVConv &cv, int h, int headDim, int kvHeads,
                                                         float eps) {
@@ -945,7 +946,93 @@ static __device__ __forceinline__ void ink2_put_v_nvfp4(uint8_t *dst, uint8_t *s
     const int i = 32 * u + lane;
     if (i < headDim) x[u] = __fmul_rn(x[u], s);
   }
+  if constexpr (FwhtV) {
+#pragma unroll
+    for (int u = 0; u < INK2_KV_REGS; ++u) x[u] = ink2_fwht16_elem(x[u], lane);
+  }
   ink2_store_nvfp4_head(dst, scaleDst, overflow, x, headDim, badS);
+}
+
+static constexpr float kInk2FP8BlockMaxAbsmax = kInk2FP8Max * kInk2FP8Max; // 448.0f * 448.0f
+
+// Block-16 FP8 E4M3FN quantize with per-16-element E4M3FN block scales of one head
+// already normalized/clipped in registers x[u] where lane owns element i = 32*u + lane.
+static __device__ __forceinline__ void ink2_store_fp8_blk16_head(uint8_t *dst, uint8_t *scaleDst, int *overflow,
+                                                                 const float (&x)[INK2_KV_REGS], int headDim,
+                                                                 int badPre) {
+  const int lane = threadIdx.x & 31;
+  const int sub = lane & 15;
+  const int nblocks = headDim >> 4;
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    const int b = 2 * u + (lane >> 4);
+    if (b >= nblocks) break;
+    const float val = i < headDim ? x[u] : 0.f;
+    const int badElem = badPre || !isfinite(val);
+    const float amax16 = ink2_halfwarp_max(badElem ? 0.f : fabsf(val));
+    const int badBlk = badElem || !isfinite(amax16) || (amax16 > kInk2FP8BlockMaxAbsmax);
+    const unsigned mask = (lane < 16) ? 0x0000ffffu : 0xffff0000u;
+    const int anyBad = __any_sync(mask, badBlk != 0);
+    if (anyBad) {
+      if (sub == 0) {
+        if (overflow) atomicOr(overflow, 1);
+        scaleDst[b] = 0u;
+      }
+      dst[b * 16 + sub] = 0u;
+      continue;
+    }
+    uint8_t scCode = 0u;
+    float inv = 0.f;
+    if (amax16 >= kInk2FP8MinAbsmax) {
+      scCode = ink2_e4m3fn_ceil_encode(amax16);
+      if (scCode != 0u) {
+        const float sc = ink2_e4m3fn_decode(scCode);
+        if (sc > 0.f && isfinite(sc)) inv = __fdiv_rn(127.0f, sc);
+        else scCode = 0u;
+      }
+    }
+    if (sub == 0) scaleDst[b] = scCode;
+    int q = __float2int_rn(__fmul_rn(val, inv));
+    if (q > 127) q = 127;
+    if (q < -127) q = -127;
+    dst[b * 16 + sub] = (uint8_t)(int8_t)q;
+  }
+}
+
+// ink2_put_k_fp8_blk16: same fp32 conv + L2 clip as ink2_put_k, then block-16 E4M3FN + E4M3FN block scales.
+static __device__ __forceinline__ void ink2_put_k_fp8_blk16(uint8_t *dst, uint8_t *scaleDst, int *overflow,
+                                                            const float *k, const Ink2KVConv &cv, int h, int headDim,
+                                                            int kvHeads, float qkClip) {
+  const int lane = threadIdx.x & 31;
+  const int kvDim = kvHeads * headDim;
+  float x[INK2_KV_REGS];
+  float ss = 0.f;
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    if (i < headDim) {
+      const int c = h * headDim + i;
+      const float val =
+          cv.on ? ink2_conv_chan(k[c], c, cv.w[0], cv.dyn[0], cv.hist[0], kvDim, kvHeads, cv.kn, cv.norm[0]) : k[c];
+      x[u] = val;
+      ss = fmaf(val, val, ss);
+    } else {
+      x[u] = 0.f;
+    }
+  }
+  ss = ink2_warp_sum(ss);
+  const float norm = __fadd_rn((float)sqrt((double)ss), 1e-6f);
+  float f = __fdiv_rn(qkClip, norm);
+  if (f > 1.f) f = 1.f;
+  if (f < 0.f) f = 0.f;
+  const int badF = !isfinite(f);
+#pragma unroll
+  for (int u = 0; u < INK2_KV_REGS; ++u) {
+    const int i = 32 * u + lane;
+    if (i < headDim) x[u] = __fmul_rn(x[u], f);
+  }
+  ink2_store_fp8_blk16_head(dst, scaleDst, overflow, x, headDim, badF);
 }
 
 // Post-projection attention prep for one layer visit: per-head q/r clips, k clip, v RMS,
@@ -953,7 +1040,7 @@ static __device__ __forceinline__ void ink2_put_v_nvfp4(uint8_t *dst, uint8_t *s
 // current position (ring index for local slots). Blocks: [0,heads) q+r heads, then
 // kvHeads k heads, then kvHeads v heads; one warp per head. blockIdx.y is the sequence.
 // T is the cache element (float, __half, or uint8_t E4M3FN/NVFP4); cache strides are in elements.
-template <class T, bool NVFP4 = false>
+template <class T, bool NVFP4 = false, bool AsymK8V4 = false>
 __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float *v, const float *qclip,
                                 const float *rclip, T *kcache, T *vcache, const float *meta,
                                 int heads, int kvHeads, int headDim, int relLen, float qkClip, float relClip,
@@ -994,7 +1081,12 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
   const int kvDim = kvHeads * headDim;
   if (b < heads + kvHeads) {
     const int h = b - heads;
-    if constexpr (NVFP4) {
+    if constexpr (AsymK8V4) {
+      const int hBlks = headDim >> 4;
+      ink2_put_k_fp8_blk16(kcache + (size_t)idx * kvDim + (size_t)h * headDim,
+                           (uint8_t *)kscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow, k, cv,
+                           h, headDim, kvHeads, qkClip);
+    } else if constexpr (NVFP4) {
       const int hBytes = headDim >> 1, hBlks = headDim >> 4;
       ink2_put_k_nvfp4(kcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
                        (uint8_t *)kscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow, k, cv, h,
@@ -1008,9 +1100,9 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
     return;
   }
   const int h = b - heads - kvHeads;
-  if constexpr (NVFP4) {
+  if constexpr (NVFP4 || AsymK8V4) {
     const int hBytes = headDim >> 1, hBlks = headDim >> 4;
-    ink2_put_v_nvfp4(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
+    ink2_put_v_nvfp4<AsymK8V4>(vcache + (size_t)idx * (kvHeads * hBytes) + (size_t)h * hBytes,
                      (uint8_t *)vscale + (size_t)idx * (kvHeads * hBlks) + (size_t)h * hBlks, overflow, v, cv, h,
                      headDim, kvHeads, eps);
   } else if constexpr (sizeof(T) == 1) {
@@ -1027,7 +1119,7 @@ __global__ void k_ink2_qkv_post(float *q, float *r, const float *k, const float 
 // denominator serially in key order, the output thread-per-dim in key order.
 #define INK2_ATT_THREADS 512
 #define INK2_ATT_GROUPS 4
-template <class T, bool NVFP4 = false>
+template <class T, bool NVFP4 = false, bool AsymK8V4 = false>
 __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q, const float *r, const float *sinks, const float *relBias,
                               const T *kcache, const T *vcache, double *scores, float *out,
                               const float *meta, int heads, int kvHeads, int headDim, int relLen,
@@ -1064,7 +1156,16 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
     const int dist = pos - p;
     const size_t slotIdx = (size_t)(p % cap);
     float d = 0.f;
-    if constexpr (NVFP4) {
+    if constexpr (AsymK8V4) {
+      const int hBlks = headDim >> 4;
+      const uint8_t *kr = (const uint8_t *)kcache + slotIdx * kvDim + (size_t)kvh * headDim;
+      const uint8_t *ks = (const uint8_t *)kscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
+      for (int i = lane; i < headDim; i += 32) {
+        const float kv = (float)(int8_t)kr[i];
+        const float bsc = __fmul_rn(ink2_e4m3fn_decode(ks[i >> 4]), 1.0f / 127.0f);
+        d = fmaf(qh[i], __fmul_rn(kv, bsc), d);
+      }
+    } else if constexpr (NVFP4) {
       const int hBytes = headDim >> 1, hBlks = headDim >> 4;
       const uint8_t *kr = (const uint8_t *)kcache + slotIdx * (size_t)(kvHeads * hBytes) + (size_t)kvh * hBytes;
       const uint8_t *ks = (const uint8_t *)kscale + slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks;
@@ -1088,7 +1189,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
       d += __shfl_xor_sync(0xffffffff, d, o);
       rd += __shfl_xor_sync(0xffffffff, rd, o);
     }
-    if constexpr (!NVFP4 && sizeof(T) == 1)
+    if constexpr (!NVFP4 && !AsymK8V4 && sizeof(T) == 1)
       d = __fmul_rn(d, ((const float *)kscale)[slotIdx * (size_t)kvHeads + (size_t)kvh]);
     float bias = -sinks[h];
     if (dist < extent) bias = __fadd_rn(bias, rd);
@@ -1130,7 +1231,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
       const float w = wsh[j];
       const size_t slotIdx = (size_t)((first + j) % cap);
       float vval;
-      if constexpr (NVFP4) {
+      if constexpr (NVFP4 || AsymK8V4) {
         const int hBytes = headDim >> 1, hBlks = headDim >> 4;
         const uint8_t packed = ((const uint8_t *)vcache)[slotIdx * (size_t)(kvHeads * hBytes) + (size_t)kvh * hBytes + (dd >> 1)];
         const uint8_t scb = ((const uint8_t *)vscale)[slotIdx * (size_t)(kvHeads * hBlks) + (size_t)kvh * hBlks + (dd >> 4)];
@@ -1148,6 +1249,7 @@ __global__ void __launch_bounds__(INK2_ATT_THREADS) k_ink2_attend(const float *q
   if (threadIdx.x < headDim) {
     float acc = 0.f;
     for (int gg = 0; gg < groups; ++gg) acc += gacc[gg][threadIdx.x];
+    if constexpr (AsymK8V4) acc = ink2_fwht16_elem(acc, threadIdx.x & 31);
     out[(size_t)h * headDim + threadIdx.x] = acc;
   }
 }
@@ -1851,6 +1953,35 @@ extern "C" int fcuda_ink2_qkv_post_nvfp4(float *q, float *r, const float *k, con
   return ink2_last_error();
 }
 
+// fcuda_ink2_qkv_post_asym writes block-16 FP8 K + block-16 NVFP4 V with E4M3FN block scales.
+extern "C" int fcuda_ink2_qkv_post_asym(float *q, float *r, const float *k, const float *v, const float *qclip,
+                                        const float *rclip, uint8_t *kcache, uint8_t *vcache, uint8_t *kscale,
+                                        uint8_t *vscale, int *overflow, const float *meta, int heads, int kvHeads,
+                                        int headDim, int relLen, float qkClip, float relClip, float eps, int global,
+                                        float alpha, float floorTok, int cap, const float *const *conv, float kNorm,
+                                        float vNorm, int kn) {
+  if (headDim < 16 || (headDim & 15) != 0 || headDim > 32 * INK2_KV_REGS || kvHeads < 1 || heads < 1 || cap < 1)
+    return (int)cudaErrorInvalidValue;
+  Ink2KVConv cv = {};
+  if (conv) {
+    cv.w[0] = conv[0];
+    cv.w[1] = conv[1];
+    cv.dyn[0] = conv[2];
+    cv.dyn[1] = conv[3];
+    cv.hist[0] = (float *)conv[4];
+    cv.hist[1] = (float *)conv[5];
+    cv.norm[0] = kNorm;
+    cv.norm[1] = vNorm;
+    cv.kn = kn;
+    cv.on = 1;
+  }
+  const dim3 blocks(heads + 2 * kvHeads, 1);
+  FCUDA_TS("k_ink2_qkv_post", blocks, (k_ink2_qkv_post<uint8_t, false, true><<<blocks, 32, 0, g_stream>>>(
+      q, r, k, v, qclip, rclip, kcache, vcache, meta, heads, kvHeads, headDim, relLen, qkClip, relClip, eps, global,
+      alpha, floorTok, cap, cv, Ink2Seq{}, kscale, vscale, overflow)));
+  return ink2_last_error();
+}
+
 // The 48 KiB default bounds static plus dynamic shared memory, so the opt-in starts
 // below 48 KiB of dynamic bytes by the static allowance (the attend kernels carry ~5.5 KiB).
 #define INK2_SMEM_STATIC_ALLOWANCE (8 * 1024)
@@ -1868,25 +1999,25 @@ extern "C" int fcuda_ink2_attend(const float *q, const float *r, const float *si
 // scores holds st's scores stride (floats) per sequence, so sequences never share it.
 // The split/reference choice is made once for every row by the same rule a single
 // sequence applies, and the two are bit-identical anyway.
-template <class T, bool NVFP4 = false>
+template <class T, bool NVFP4 = false, bool AsymK8V4 = false>
 static int ink2_attend_seq(const float *q, const float *r, const float *sinks, const float *relBias, const T *kcache,
                            const T *vcache, double *scores, float *out, const float *meta, int heads, int kvHeads,
                            int headDim, int relLen, int extent, int window, int cap, float scale, const Ink2Seq &sq,
                            int C, const void *kscale = nullptr, const void *vscale = nullptr) {
-  if (ink2_attend_split<T, NVFP4>(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim,
-                                  relLen, extent, window, cap, scale, sq, C, kscale, vscale))
+  if (ink2_attend_split<T, NVFP4, AsymK8V4>(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads,
+                                            headDim, relLen, extent, window, cap, scale, sq, C, kscale, vscale))
     return ink2_last_error();
   const size_t smem = (size_t)cap * sizeof(float);
   if (smem + INK2_SMEM_STATIC_ALLOWANCE > 48 * 1024) {
     const cudaError_t oe =
-        cudaFuncSetAttribute(k_ink2_attend<T, NVFP4>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
+        cudaFuncSetAttribute(k_ink2_attend<T, NVFP4, AsymK8V4>, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)smem);
     if (oe != cudaSuccess) {
       cudaGetLastError();
       return (int)oe;
     }
   }
   const dim3 g(heads, C);
-  FCUDA_TS("k_ink2_attend", g, (k_ink2_attend<T, NVFP4><<<g, INK2_ATT_THREADS, smem, g_stream>>>(
+  FCUDA_TS("k_ink2_attend", g, (k_ink2_attend<T, NVFP4, AsymK8V4><<<g, INK2_ATT_THREADS, smem, g_stream>>>(
       q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads, headDim, relLen, extent, window, cap,
       scale, sq, kscale, vscale)));
   return ink2_last_error();
@@ -1932,6 +2063,19 @@ extern "C" int fcuda_ink2_attend_nvfp4(const float *q, const float *r, const flo
     return (int)cudaErrorInvalidValue;
   return ink2_attend_seq<uint8_t, true>(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads,
                                         headDim, relLen, extent, window, cap, scale, Ink2Seq{}, 1, kscale, vscale);
+}
+
+// fcuda_ink2_attend_asym attends over block-16 FP8 K + block-16 NVFP4 V with E4M3FN block scales.
+extern "C" int fcuda_ink2_attend_asym(const float *q, const float *r, const float *sinks, const float *relBias,
+                                      const uint8_t *kcache, const uint8_t *vcache, const uint8_t *kscale,
+                                      const uint8_t *vscale, double *scores, float *out, const float *meta, int heads,
+                                      int kvHeads, int headDim, int relLen, int extent, int window, int cap,
+                                      float scale) {
+  if (headDim < 16 || (headDim & 15) != 0 || headDim > 256 || INK2_ATT_THREADS / headDim > INK2_ATT_GROUPS ||
+      kvHeads < 1 || heads < 1 || cap < 1)
+    return (int)cudaErrorInvalidValue;
+  return ink2_attend_seq<uint8_t, false, true>(q, r, sinks, relBias, kcache, vcache, scores, out, meta, heads, kvHeads,
+                                               headDim, relLen, extent, window, cap, scale, Ink2Seq{}, 1, kscale, vscale);
 }
 
 extern "C" int fcuda_ink2_sigmoid_mul(float *x, const float *gate, int n) {

@@ -40,6 +40,8 @@ var (
 	ErrLaneNotAdvanced = errors.New("radixkv: lane has no current page set to checkpoint")
 	// ErrLaneRegression is returned when Advance moves a lane backwards.
 	ErrLaneRegression = errors.New("radixkv: lane token position regressed")
+	// ErrCheckpointBranchSameLane is returned when Branch targets the source lane.
+	ErrCheckpointBranchSameLane = errors.New("radixkv: branch target lane must differ from source lane")
 )
 
 // CheckpointID is a ring-scoped, monotonically increasing handle for one saved
@@ -231,6 +233,59 @@ func (r *CheckpointRing) Restore(lane string, id CheckpointID) (int, error) {
 		r.releasePageSet(cur.pageSet)
 	}
 	r.lanes[lane] = &laneState{pos: cp.tokenPos, pageSet: append([]int(nil), cp.pageSet...)}
+	return cp.tokenPos, nil
+}
+
+// RestoreLatest restores the most recent checkpoint in lane's ring (O(checkpoint)
+// undo/retry) and returns its id and token position. Fails closed with
+// ErrCheckpointUnknown when the lane has no checkpoints.
+func (r *CheckpointRing) RestoreLatest(lane string) (CheckpointID, int, error) {
+	if r == nil {
+		return 0, 0, ErrCheckpointRingNil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ids := r.order[lane]
+	if len(ids) == 0 {
+		return 0, 0, ErrCheckpointUnknown
+	}
+	id := ids[len(ids)-1]
+	cp := r.checkpts[lane][id]
+	if _, err := retainBlocks(r.alloc, cp.pageSet); err != nil {
+		return 0, 0, err
+	}
+	if cur, ok := r.lanes[lane]; ok {
+		r.releasePageSet(cur.pageSet)
+	}
+	r.lanes[lane] = &laneState{pos: cp.tokenPos, pageSet: append([]int(nil), cp.pageSet...)}
+	return id, cp.tokenPos, nil
+}
+
+// Branch forks dstLane from srcLane's checkpoint id in O(checkpoint) without
+// mutating srcLane or copying KV bytes: dstLane adopts and retains cp.pageSet at
+// cp.tokenPos. Fails closed on nil ring, empty/identical lanes, or unknown id.
+func (r *CheckpointRing) Branch(srcLane, dstLane string, id CheckpointID) (int, error) {
+	if r == nil {
+		return 0, ErrCheckpointRingNil
+	}
+	if srcLane == "" || dstLane == "" || srcLane == dstLane {
+		return 0, ErrCheckpointBranchSameLane
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	cp, ok := r.checkpts[srcLane][id]
+	if !ok {
+		return 0, ErrCheckpointUnknown
+	}
+	if _, err := retainBlocks(r.alloc, cp.pageSet); err != nil {
+		return 0, err
+	}
+	if cur, ok := r.lanes[dstLane]; ok {
+		r.releasePageSet(cur.pageSet)
+	}
+	r.lanes[dstLane] = &laneState{pos: cp.tokenPos, pageSet: append([]int(nil), cp.pageSet...)}
 	return cp.tokenPos, nil
 }
 

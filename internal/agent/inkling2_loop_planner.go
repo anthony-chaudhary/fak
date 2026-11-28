@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
+	"github.com/anthony-chaudhary/fak/internal/toolgrammar"
 )
 
 // Inkling2LoopDefaultMaxTokens is the completion budget of a request that sets none.
@@ -77,6 +78,13 @@ type Inkling2LoopLogitGenerator interface {
 	GenerateLogits(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func(logits []float32) (int, error), emit func(id int) bool) (Inkling2LoopGeneration, error)
 }
 
+// Inkling2LoopDraftGenerator is an optional interface implemented by generators
+// that can emit deterministic forced-token spans from Inkling2LoopDrafter and
+// advance KV state via batched Prefill rather than serial per-token Steps.
+type Inkling2LoopDraftGenerator interface {
+	GenerateDraft(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sample func(logits []float32) (int, error), draft Inkling2LoopDrafter, emit func(id int) bool) (Inkling2LoopGeneration, error)
+}
+
 // inkling2LoopGPUOwner is implemented by a generator whose own executor serializes
 // every GPU call; the planner admits concurrent turns to such a generator so they
 // can share a cohort.
@@ -95,6 +103,8 @@ type Inkling2LoopPlanner struct {
 	stops         map[int]bool
 	contextTokens int
 	mu            sync.Mutex
+	vocabOnce     sync.Once
+	prefixVocab   *toolgrammar.PrefixVocab
 }
 
 var _ StreamingPlanner = (*Inkling2LoopPlanner)(nil)
@@ -138,24 +148,37 @@ func inkling2ResolveSampleParams(sp SampleParams) (temp, topP float64, useSample
 	return temp, topP, useSampler
 }
 
-func (p *Inkling2LoopPlanner) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sp SampleParams, emit func(int) bool) (Inkling2LoopGeneration, error) {
+func (p *Inkling2LoopPlanner) generate(ctx context.Context, prompt []int, maxNew int, stops map[int]bool, sp SampleParams, tools []ToolDef, emit func(int) bool) (Inkling2LoopGeneration, error) {
+	var sampler func(logits []float32) (int, error)
 	if temp, topP, useSampler := inkling2ResolveSampleParams(sp); useSampler {
+		sampler = newInkling2LoopSampler(sp, temp, topP)
+	}
+	var run func() (Inkling2LoopGeneration, error)
+	if drafter := p.newForcedDrafter(sp, tools); drafter != nil {
+		if dg, ok := p.gen.(Inkling2LoopDraftGenerator); ok {
+			run = func() (Inkling2LoopGeneration, error) {
+				return dg.GenerateDraft(ctx, prompt, maxNew, stops, sampler, drafter, emit)
+			}
+		}
+	}
+	if run == nil && sampler != nil {
 		if lg, ok := p.gen.(Inkling2LoopLogitGenerator); ok {
-			sampler := newInkling2LoopSampler(sp, temp, topP)
-			if owner, ok := p.gen.(inkling2LoopGPUOwner); ok && owner.SerializesGPUAccess() {
+			run = func() (Inkling2LoopGeneration, error) {
 				return lg.GenerateLogits(ctx, prompt, maxNew, stops, sampler, emit)
 			}
-			p.mu.Lock()
-			defer p.mu.Unlock()
-			return lg.GenerateLogits(ctx, prompt, maxNew, stops, sampler, emit)
+		}
+	}
+	if run == nil {
+		run = func() (Inkling2LoopGeneration, error) {
+			return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
 		}
 	}
 	if owner, ok := p.gen.(inkling2LoopGPUOwner); ok && owner.SerializesGPUAccess() {
-		return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
+		return run()
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.gen.Generate(ctx, prompt, maxNew, stops, emit)
+	return run()
 }
 
 // newInkling2LoopSampler builds a per-request stateful sampler closure backed by the
@@ -446,7 +469,7 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 		}
 		return !cycle.push(id)
 	}
-	res, err := p.generate(ctx, ids, maxNew, p.stops, sp, emit)
+	res, err := p.generate(ctx, ids, maxNew, p.stops, sp, tools, emit)
 	if err != nil {
 		var stage *model.BackendForwardOperationError
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrNonFiniteLogits) || IsLocalForwardError(err) || errors.As(err, &stage) {
@@ -484,6 +507,7 @@ func (p *Inkling2LoopPlanner) complete(ctx context.Context, messages []Message, 
 		},
 		Timings: inkling2LoopTimings(len(ids), res),
 	}
+	populateReasoningTokensUsage(comp, p.tok)
 	if res.CachedPromptTokens > 0 {
 		comp.Usage.PromptTokensDetails = &UsageTokenDetails{CachedTokens: res.CachedPromptTokens}
 	}

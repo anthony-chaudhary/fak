@@ -157,6 +157,8 @@ type inkling2Resident struct {
 	fp8Dev     compute.Inkling2FP8KVDevice
 	kvNVFP4    bool
 	nvfp4Dev   compute.Inkling2NVFP4KVDevice
+	kvAsym     bool
+	asymDev    compute.Inkling2AsymKVDevice
 	ks, vs     []ink2Ref
 	kvOverflow ink2Ref
 
@@ -370,6 +372,11 @@ func inkling2ResidentCtxAutoSet(lookup func(string) (string, bool)) bool {
 func inkling2GlobalKVSlotBytes(hp model.Inkling2LoopHParams, cap int, dtype Inkling2KVDType) int64 {
 	kvDim := int64(hp.KVHeads * hp.HeadDim)
 	switch dtype {
+	case Inkling2KVAsym:
+		kCodeBytes := int64(compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
+		vCodeBytes := int64(compute.Ink2NVFP4KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
+		scaleBytes := int64(compute.Ink2NVFP4KVScaleFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
+		return kCodeBytes + vCodeBytes + 2*scaleBytes
 	case Inkling2KVNVFP4:
 		codeBytes := int64(compute.Ink2NVFP4KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
 		scaleBytes := int64(compute.Ink2NVFP4KVScaleFloats(cap, hp.KVHeads, hp.HeadDim)) * 4
@@ -487,6 +494,16 @@ func inkling2ResolveAutoCtx(be compute.Backend, hp model.Inkling2LoopHParams, pr
 	return inkling2ResolveAutoCtxFor(be, hp, false, 0, inkling2ResidentFixedBytes(hp, inkling2ArenaFloats)+prefill, dtype)
 }
 
+// inkling2ResidentKVBudget is the single shared VRAM budget helper used by both
+// auto-context resolution (inkling2ResolveAutoCtxFor / inkling2AutoFitCtxFor) and
+// session ring allocation (inkling2KVFitFor / newInkling2ResidentRingFor) so
+// auto-ctx never drifts from ring allocation.
+func inkling2ResidentKVBudget(free, other int64) (budget, left int64) {
+	budget = free - inkling2DeviceHeadroom(free)
+	left = budget - other
+	return budget, left
+}
+
 // inkling2ResolveAutoCtxFor sizes the global cache from free device memory using the
 // exact KV + other fit formula so the resolved auto context always passes
 // inkling2FitResidentKVFor.
@@ -497,8 +514,7 @@ func inkling2ResolveAutoCtxFor(be compute.Backend, hp model.Inkling2LoopHParams,
 		return Inkling2ResidentCtxDefault, nil
 	}
 	perPos := inkling2ResidentPerPosBytesFor(hp, dtype)
-	budget := free - inkling2DeviceHeadroom(free)
-	left := budget - other
+	_, left := inkling2ResidentKVBudget(free, other)
 	ceil := inkling2AutoCtxMax(be.Name(), dtype != Inkling2KVF32)
 	ctx := 0
 	if left > 0 {
@@ -565,8 +581,7 @@ func inkling2AutoFitCtxFor(m *Inkling2LoopModel, be compute.Backend, free int64,
 		prefillChunk = max(chunk, inkling2PrefillChunkBase)
 	}
 	other := inkling2ResidentOtherBytesFor(m.HP, inkling2ArenaFloats, prefillChunk, 0, inkling2PrefillFP8Enabled(be, lookup))
-	budget := free - inkling2DeviceHeadroom(free)
-	left := budget - other
+	_, left := inkling2ResidentKVBudget(free, other)
 	ceil := inkling2AutoCtxMax(be.Name(), dtype != Inkling2KVF32)
 	fit := 0
 	if left > 0 {
@@ -754,12 +769,12 @@ func inkling2KVFitFor(hp model.Inkling2LoopHParams, ctx int, batched bool, chunk
 		}
 		return kv, &Inkling2KVOverBudgetError{Ctx: ctx, MaxCtx: ceiling, NeedBytes: need, FreeBytes: free}
 	}
-	budget := free - inkling2DeviceHeadroom(free)
+	budget, left := inkling2ResidentKVBudget(free, other)
 	if need <= budget {
 		return kv, nil
 	}
 	maxCtx := 0
-	if left := budget - other; left >= 0 {
+	if left >= 0 {
 		maxCtx = inkling2MaxResidentCtxFor(hp, batched, chunk, dtype, ctx-1, left)
 	}
 	if maxCtx < Inkling2ResidentCtxMin {
@@ -864,6 +879,9 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 			return nil, err
 		}
 		switch dtype {
+		case Inkling2KVAsym:
+			s.kvAsym = true
+			s.asymDev, _ = be.(compute.Inkling2AsymKVDevice)
 		case Inkling2KVNVFP4:
 			s.kvNVFP4 = true
 			s.nvfp4Dev, _ = be.(compute.Inkling2NVFP4KVDevice)
@@ -936,6 +954,12 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 		maxCap = max(maxCap, cap)
 		if ctx > 0 {
 			switch {
+			case s.kvAsymSlot(slot):
+				kCodeFloats := compute.Ink2FP8KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
+				vCodeFloats := compute.Ink2NVFP4KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
+				scaleFloats := compute.Ink2NVFP4KVScaleFloats(cap, hp.KVHeads, hp.HeadDim)
+				s.kc[slot], s.vc[slot] = s.alloc(kCodeFloats), s.alloc(vCodeFloats)
+				s.ks[slot], s.vs[slot] = s.alloc(scaleFloats), s.alloc(scaleFloats)
 			case s.kvNVFP4Slot(slot):
 				codeFloats := compute.Ink2NVFP4KVCodeFloats(cap, hp.KVHeads, hp.HeadDim)
 				scaleFloats := compute.Ink2NVFP4KVScaleFloats(cap, hp.KVHeads, hp.HeadDim)
@@ -955,7 +979,7 @@ func newInkling2ResidentRingFor(m *Inkling2LoopModel, be compute.Backend, ctx, a
 	}
 	if ctx > 0 {
 		s.scores = s.alloc(2 * hp.Heads * maxCap)
-		if s.kvFP8 || s.kvNVFP4 {
+		if s.kvFP8 || s.kvNVFP4 || s.kvAsym {
 			s.kvOverflow = s.alloc(1)
 		}
 	}
@@ -1064,6 +1088,21 @@ func inkling2SlotLayer(hp model.Inkling2LoopHParams, slot int) int {
 	return hp.CoreStart + (slot-hp.Layers)%core
 }
 
+func (s *inkling2Resident) hasAnyCapture() bool {
+	if s.graphReady || s.verifyReady || s.keepReady {
+		return true
+	}
+	for i := range s.tailReady {
+		if s.tailReady[i] || s.tailKeepReady[i] {
+			return true
+		}
+	}
+	if d, ok := s.draft.(*ink2DeviceDraft); ok && d != nil && d.ready {
+		return true
+	}
+	return false
+}
+
 func (s *inkling2Resident) close() {
 	s.pipeDrain()
 	if s.report && s.decN > 0 {
@@ -1073,7 +1112,11 @@ func (s *inkling2Resident) close() {
 		}
 	}
 	if s.dev != nil {
-		s.dev.Ink2GraphReset()
+		dev := inkling2DeviceFor(s.dev)
+		cur := dev.Owner()
+		if cur == nil || inkling2SameOwner(cur, s) || s.hasAnyCapture() || s.warm || s.verifyWarm {
+			dev.Reset()
+		}
 	}
 	for _, t := range s.owned {
 		s.be.Free(t)
@@ -1284,6 +1327,8 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	cap := s.caps[slot]
 	if s.err == nil {
 		switch {
+		case s.kvAsymSlot(slot):
+			s.fail(s.asymDev.Ink2QKVPostAsym(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, meta, p, cap, cv))
 		case s.kvNVFP4Slot(slot):
 			s.fail(s.nvfp4Dev.Ink2QKVPostNVFP4(q, r, k, v, l.qclip, l.relClip, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.kvOverflow, meta, p, cap, cv))
 		case s.kvFP8Slot(slot):
@@ -1301,6 +1346,8 @@ func (s *inkling2Resident) layer(slot, ip int, cur ink2Ref, blocks *[]ink2Ref, m
 	attn := s.tmp(hp.Heads * hp.HeadDim)
 	if s.err == nil {
 		switch {
+		case s.kvAsymSlot(slot):
+			s.fail(s.asymDev.Ink2AttendAsym(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.scores, attn, meta, p, extent, window, cap))
 		case s.kvNVFP4Slot(slot):
 			s.fail(s.nvfp4Dev.Ink2AttendNVFP4(q, r, sinks, l.relBias, s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot], s.scores, attn, meta, p, extent, window, cap))
 		case s.kvFP8Slot(slot):
@@ -1506,7 +1553,7 @@ func (s *inkling2Resident) step(token int) (int, error) {
 	if overflow, oerr := s.checkKVOverflow(); oerr != nil {
 		return 0, oerr
 	} else if overflow {
-		if s.kvNVFP4 {
+		if s.kvNVFP4 || s.kvAsym {
 			return 0, ErrInkling2NVFP4ScaleOverflow
 		}
 		return 0, ErrInkling2FP8ScaleOverflow
@@ -1579,6 +1626,12 @@ func (s *inkling2Resident) kvFP8Slot(slot int) bool {
 	return s.kvFP8 && !s.localAt(slot)
 }
 
+// kvAsymSlot reports whether slot's K cache is block-16 FP8 and V cache is block-16 NVFP4
+// with per-16-element E4M3FN scales: the global slots of an fp8k_nvfp4v session.
+func (s *inkling2Resident) kvAsymSlot(slot int) bool {
+	return s.kvAsym && !s.localAt(slot)
+}
+
 // kvNVFP4Slot reports whether slot's K and V caches are block-16 packed E2M1 with
 // per-16-element E4M3FN scales: the global slots of an nvfp4 session. Local rings stay fp32.
 func (s *inkling2Resident) kvNVFP4Slot(slot int) bool {
@@ -1588,6 +1641,8 @@ func (s *inkling2Resident) kvNVFP4Slot(slot int) bool {
 // kvDType returns the active global-slot KV dtype of the session.
 func (s *inkling2Resident) kvDType() Inkling2KVDType {
 	switch {
+	case s.kvAsym:
+		return Inkling2KVAsym
 	case s.kvNVFP4:
 		return Inkling2KVNVFP4
 	case s.kvFP8:
@@ -1607,9 +1662,9 @@ func (s *inkling2Resident) checkFP8Overflow() (bool, error) {
 	return s.checkKVOverflow()
 }
 
-// checkKVOverflow reads the device overflow flag when the session uses FP8 or NVFP4 global KV.
+// checkKVOverflow reads the device overflow flag when the session uses FP8, NVFP4, or asymmetric global KV.
 func (s *inkling2Resident) checkKVOverflow() (bool, error) {
-	if (!s.kvFP8 && !s.kvNVFP4) || s.kvOverflow.T.Buf() == nil {
+	if (!s.kvFP8 && !s.kvNVFP4 && !s.kvAsym) || s.kvOverflow.T.Buf() == nil {
 		return false, nil
 	}
 	flag, err := s.dev.Ink2ReadInts(s.kvOverflow, 1)
@@ -1638,7 +1693,7 @@ func (s *inkling2Resident) fallbackNVFP4ToHigher() error {
 	hp := s.hp
 	kvDim := hp.KVHeads * hp.HeadDim
 	for slot, cap := range s.caps {
-		if !s.kvNVFP4Slot(slot) {
+		if !s.kvNVFP4Slot(slot) && !s.kvAsymSlot(slot) {
 			continue
 		}
 		s.release(s.kc[slot], s.vc[slot], s.ks[slot], s.vs[slot])
@@ -1657,6 +1712,8 @@ func (s *inkling2Resident) fallbackNVFP4ToHigher() error {
 	s.kvOverflow = ink2Ref{}
 	s.kvNVFP4 = false
 	s.nvfp4Dev = nil
+	s.kvAsym = false
+	s.asymDev = nil
 	if useFP8 {
 		s.kvFP8 = true
 		s.fp8Dev, _ = s.be.(compute.Inkling2FP8KVDevice)

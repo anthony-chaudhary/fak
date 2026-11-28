@@ -229,6 +229,26 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
+    },
+    {
+      "id": "context-ctx-maxresidentctx",
+      "canonical": "MaxResidentCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "MaxResidentCtx is the hard upper-bound resident global KV context on ModelMemoryBudget consumed by the model-agnostic ServeEnvelope solver, clamping resolved context tokens below backend capacity limits.",
+      "distinction": "The model-agnostic backend hard resident context ceiling in ModelMemoryBudget - not Inkling2AutoCtxCeiling (the default auto-fit cap) and not Inkling2ResidentFitCtx (the live free-VRAM fit calculation).",
+      "distinct_from": [
+        "context-ctx-inkling2autoctxceiling",
+        "context-ctx-inkling2residentctxmax",
+        "context-ctx-inkling2residentfitctx"
+      ],
+      "aliases": [],
+      "grounding": "MaxResidentCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
     }
   ]
 }

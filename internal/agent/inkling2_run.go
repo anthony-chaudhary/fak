@@ -124,6 +124,20 @@ func inkling2Param[T int | float64](v *T, fallback T) T {
 	return fallback
 }
 
+func inkling2RunEffectiveTemperature(sp SampleParams) float64 {
+	if sp.Temperature != nil {
+		return *sp.Temperature
+	}
+	if sp.InheritUpstreamTemperature {
+		return defaultInheritedTemperature
+	}
+	return 0
+}
+
+func inkling2RunUseDeviceGreedy(hasDevice bool, temp, freq, pres float64, sp SampleParams) bool {
+	return hasDevice && temp == 0 && freq == 0 && pres == 0 && len(sp.LogitBias) == 0
+}
+
 func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	sp := applySampleOpts(opts...)
 	if len(tools) > 0 || sp.ThinkingBudget != nil {
@@ -147,14 +161,14 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 	if maxTokens < 1 || maxTokens > math.MaxInt-len(ids) {
 		return nil, fmt.Errorf("Inkling 2: invalid token limit %d", maxTokens)
 	}
-	temp, topP, useSampler := inkling2ResolveSampleParams(sp)
+	temp, topP, _ := inkling2ResolveSampleParams(sp)
 	topK := inkling2Param(sp.TopK, 0)
 	freq, pres := inkling2Param(sp.FrequencyPenalty, 0), inkling2Param(sp.PresencePenalty, 0)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if p.device != nil && !useSampler {
-		return p.deviceGreedy(sp, ids, maxTokens)
+	if inkling2RunUseDeviceGreedy(p.device != nil, temp, freq, pres, sp) {
+		return p.deviceGreedy(ctx, sp, ids, maxTokens)
 	}
 	h, err := model.NewInkling2LoopHost(p.model.HP, p.model.Weights)
 	if err != nil {
@@ -206,6 +220,7 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 	bias := model.LogitBias(sp.LogitBias)
 	var ws samplerWorkspace
 	var cycle tokenCycleBreaker
+	var cb rollingTokenCycleBreaker
 	var generated []int
 	steps, sampled := 0, 0
 	reason := "length"
@@ -223,7 +238,7 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 			break
 		}
 		generated = append(generated, id)
-		if cycle.push(id) {
+		if cycle.push(id) || cb.Observe(id) {
 			reason = "stop"
 			break
 		}
@@ -244,8 +259,8 @@ func (p *inkling2RunPlanner) Complete(ctx context.Context, messages []Message, t
 
 // deviceGreedy runs the resident and speculative device decoders, which stop
 // at EOS like the sampled loop: the reply excludes it and it counts as sampled.
-func (p *inkling2RunPlanner) deviceGreedy(sp SampleParams, ids []int, maxTokens int) (*Completion, error) {
-	out, st, err := ggufload.Inkling2LoopGreedyUntil(p.model, p.device, ids, maxTokens, p.eos)
+func (p *inkling2RunPlanner) deviceGreedy(ctx context.Context, sp SampleParams, ids []int, maxTokens int) (*Completion, error) {
+	out, st, err := ggufload.Inkling2LoopGreedyUntilContext(ctx, p.model, p.device, ids, maxTokens, p.eos)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +277,7 @@ func (p *inkling2RunPlanner) result(sp SampleParams, generated []int, prompt, sa
 		return nil, err
 	}
 	t := NewTimings(prompt, 0, steps, prefill.Seconds(), decode.Seconds())
-	return &Completion{
+	comp := &Completion{
 		Model:        p.name,
 		Message:      msg,
 		FinishReason: reason,
@@ -273,5 +288,7 @@ func (p *inkling2RunPlanner) result(sp SampleParams, generated []int, prompt, sa
 			CompletionTokensDetails: nativeReasoningTokenDetails(p.tok, msg.ReasoningContent, sampled),
 		},
 		Timings: t,
-	}, nil
+	}
+	populateReasoningTokensUsage(comp, p.tok)
+	return comp, nil
 }

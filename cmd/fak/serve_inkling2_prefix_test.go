@@ -490,33 +490,42 @@ func TestInkling2ServeGeneratorF32PreservesExplicitPrefixReuse(t *testing.T) {
 	}
 }
 
-// Behind the cohort engine every lone request runs on a fresh session whatever
-// FAK_INKLING2_PREFIX_SLOTS says, and the startup message says it is ignored.
+// Scalar prefix-reuse slots coexist with cohorts under the unified byte ledger:
+// lone requests reuse their prefix slots, and cohort arrival evicts idle
+// scalar slots in LRU order when needed to fit under the shared watermark.
 func TestInkling2PrefixSlotsOffBehindCohorts(t *testing.T) {
-	eng, opened := inkling2SlotEngine([]int{'a', 'b'}, 4, 1<<40, 0)
+	const capBytes = 300
+	eng, opened := inkling2SlotEngine([]int{'a', 'b'}, 4, capBytes, 100)
 	defer eng.Close()
-	note := inkling2ScalarBehindCohorts(eng)
-	if !strings.Contains(note, "FAK_INKLING2_PREFIX_SLOTS=4 ignored") {
-		t.Fatalf("note %q does not name the ignored slots", note)
-	}
+	st := eng.prefixState()
+
 	a1, b1 := []int{'A', 'p'}, []int{'B', 'p'}
 	inkling2Gen(t, eng, a1, 1)
 	inkling2Gen(t, eng, b1, 1)
-	if res, _ := inkling2Gen(t, eng, inkling2Extend(a1, 'q'), 1); res.CachedPromptTokens != 0 {
-		t.Fatalf("lone request behind cohorts cached %d, want a fresh session", res.CachedPromptTokens)
+	if res, _ := inkling2Gen(t, eng, inkling2Extend(a1, 'q'), 1); res.CachedPromptTokens == 0 {
+		t.Fatalf("scalar request behind cohorts did not reuse prefix slot: cached=%d", res.CachedPromptTokens)
 	}
-	for i, s := range *opened {
-		if !s.closed {
-			t.Fatalf("session %d stayed resident beside the cohorts", i)
-		}
+	wantBefore := (*opened)[0].HeldBytes() + (*opened)[1].HeldBytes()
+	if eng.prefixSlotCount() != 2 || st.ledger.Total() != wantBefore {
+		t.Fatalf("before cohort: slots=%d ledger=%d, want 2/%d", eng.prefixSlotCount(), st.ledger.Total(), wantBefore)
 	}
-	if eng.prefixSlotCount() != 0 {
-		t.Fatalf("%d slots resident behind cohorts", eng.prefixSlotCount())
+
+	batch := &inkling2LoopBatchEngine{
+		ledger:         st.ledger,
+		evictIdleSlots: eng.evictIdleSlotsForCohort,
 	}
-	one, _ := inkling2SlotEngine([]int{'a'}, 1, 1<<40, 0)
-	defer one.Close()
-	if note := inkling2ScalarBehindCohorts(one); note != "" {
-		t.Fatalf("default one slot note %q, want none", note)
+	// Cohort needs 150 bytes: wantBefore + 150 > 300, so LRU slot (b1) must be evicted.
+	batch.admitCohortMemory(150)
+	wantAfter := (*opened)[0].HeldBytes()
+	if eng.prefixSlotCount() != 1 || st.ledger.Total() != wantAfter {
+		t.Fatalf("after cohort admission: slots=%d ledger=%d, want 1/%d", eng.prefixSlotCount(), st.ledger.Total(), wantAfter)
+	}
+	if (*opened)[0].closed || !(*opened)[1].closed {
+		t.Fatalf("expected LRU slot 1 evicted and slot 0 retained, closed=(%v,%v)", (*opened)[0].closed, (*opened)[1].closed)
+	}
+	// Default FAK_INKLING2_PREFIX_SLOTS remains 1.
+	if slots, _ := inkling2PrefixCacheFromEnv(func(string) (string, bool) { return "", false }); slots != 1 {
+		t.Fatalf("default prefix slots = %d, want 1", slots)
 	}
 }
 

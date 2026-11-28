@@ -248,27 +248,29 @@ func ElideStaleReadMessages(messages []Message, stash func(id, excerpt string, b
 	limit := len(messages) - defaultStaleProtectTail
 	for i := 0; i < limit; i++ {
 		msg := messages[i]
-		for _, call := range msg.ToolCalls {
-			if call.ID == "" {
-				continue
-			}
-			if strings.EqualFold(call.Function.Name, "read") {
-				if path := decodedToolPath(call.Function.Arguments); path != "" {
-					readPath[call.ID] = path
+		if msg.Role == RoleAssistant || len(msg.ToolCalls) > 0 || msg.FunctionCall != nil {
+			for _, call := range msg.ToolCalls {
+				if call.ID == "" {
 					continue
 				}
+				if strings.EqualFold(call.Function.Name, "read") {
+					if path := decodedToolPath(call.Function.Arguments); path != "" {
+						readPath[call.ID] = path
+						continue
+					}
+				}
+				delete(readPath, call.ID)
 			}
-			delete(readPath, call.ID)
-		}
-		if msg.FunctionCall != nil && msg.ToolCallID != "" {
-			if strings.EqualFold(msg.FunctionCall.Name, "read") {
-				if path := decodedToolPath(msg.FunctionCall.Arguments); path != "" {
-					readPath[msg.ToolCallID] = path
+			if msg.FunctionCall != nil && msg.ToolCallID != "" {
+				if strings.EqualFold(msg.FunctionCall.Name, "read") {
+					if path := decodedToolPath(msg.FunctionCall.Arguments); path != "" {
+						readPath[msg.ToolCallID] = path
+					} else {
+						delete(readPath, msg.ToolCallID)
+					}
 				} else {
 					delete(readPath, msg.ToolCallID)
 				}
-			} else {
-				delete(readPath, msg.ToolCallID)
 			}
 		}
 		if (msg.Role != RoleTool && msg.Role != "tool") || msg.ToolCallID == "" || msg.Content == "" {

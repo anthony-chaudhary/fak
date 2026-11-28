@@ -1213,3 +1213,33 @@ func TestAgentTruncatedToolCallSignal(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestNextGeneratedToolCallIDUniqueAcrossTurns(t *testing.T) {
+	t.Parallel()
+	offered := offeredTestNames("Read", "Bash")
+	turn1 := normalizeCompletionToolCalls(&Completion{
+		FinishReason: "tool_calls",
+		Message: Message{
+			Role:      RoleAssistant,
+			ToolCalls: []ToolCall{{Type: "function", Function: Func{Name: "Read", Arguments: `{"file_path":"a.go"}`}}},
+		},
+	}, offered)
+	turn2 := normalizeCompletionToolCalls(&Completion{
+		FinishReason: "tool_calls",
+		Message: Message{
+			Role:      RoleAssistant,
+			ToolCalls: []ToolCall{{Type: "function", Function: Func{Name: "Bash", Arguments: `{"command":"ls"}`}}},
+		},
+	}, offered)
+	if len(turn1.Message.ToolCalls) != 1 || len(turn2.Message.ToolCalls) != 1 {
+		t.Fatalf("expected 1 call per turn, got %d and %d", len(turn1.Message.ToolCalls), len(turn2.Message.ToolCalls))
+	}
+	id1, id2 := turn1.Message.ToolCalls[0].ID, turn2.Message.ToolCalls[0].ID
+	if id1 == "" || id2 == "" {
+		t.Fatalf("expected non-empty generated IDs, got %q and %q", id1, id2)
+	}
+	if id1 == id2 {
+		t.Fatalf("generated tool call IDs collided across turns: %q == %q", id1, id2)
+	}
+}

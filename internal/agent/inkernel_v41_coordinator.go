@@ -320,7 +320,11 @@ func (p *InKernelPlanner) runV41DecodeCohortCore(cohort []*inKernelCoalesceReque
 			if p.coalesceBatchHook != nil {
 				p.coalesceBatchHook(len(lanes))
 			}
-			decodeCtx := context.WithValue(context.Background(), inKernelV41LifecycleContextKey{}, lifecycle)
+			baseCtx := context.Background()
+			if len(lanes) == 1 && lanes[0] != nil && lanes[0].ctx != nil {
+				baseCtx = lanes[0].ctx
+			}
+			decodeCtx := context.WithValue(baseCtx, inKernelV41LifecycleContextKey{}, lifecycle)
 			receipt, terminal = decode(decodeCtx, lanes, p.m)
 		}()
 	}

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -561,6 +562,8 @@ func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 	return b.String()
 }
 
+var forcedToolCallIDSeq atomic.Uint64
+
 func enforceForcedToolChoice(comp *Completion, choice json.RawMessage, tools []ToolDef, messages []Message) *Completion {
 	if comp == nil || len(comp.Message.ToolCalls) > 0 {
 		return comp
@@ -588,7 +591,8 @@ func enforceForcedToolChoice(comp *Completion, choice json.RawMessage, tools []T
 		return comp
 	}
 	comp.Message.Content = ""
-	comp.Message.ToolCalls = []ToolCall{{ID: "call_forced_0", Type: "function", Function: Func{Name: name, Arguments: args}}}
+	id := "call_forced_" + strconv.FormatUint(forcedToolCallIDSeq.Add(1), 10)
+	comp.Message.ToolCalls = []ToolCall{{ID: id, Type: "function", Function: Func{Name: name, Arguments: args}}}
 	comp.FinishReason = "tool_calls"
 	return comp
 }

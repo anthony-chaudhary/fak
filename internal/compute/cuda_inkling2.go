@@ -361,6 +361,7 @@ var (
 	_ Inkling2HalfKVDevice        = (*cudaBackend)(nil)
 	_ Inkling2FP8KVDevice         = (*cudaBackend)(nil)
 	_ Inkling2NVFP4KVDevice       = (*cudaBackend)(nil)
+	_ Inkling2AsymKVDevice        = (*cudaBackend)(nil)
 	_ Inkling2VerifyHalfKVDevice  = (*cudaBackend)(nil)
 	_ Inkling2VerifyFP8KVDevice   = (*cudaBackend)(nil)
 	_ Inkling2VerifyNVFP4KVDevice = (*cudaBackend)(nil)
@@ -562,6 +563,68 @@ func (c *cudaBackend) Ink2PAttendNVFP4Dev(q, r, sinks, relBias, kcache, vcache, 
 		(*C.uint8_t)(c.ink2Ptr(kscale)), (*C.uint8_t)(c.ink2Ptr(vscale)), c.ink2F(out), C.int(p.Heads),
 		C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap),
 		C.float(p.Scale), c.ink2I(posDev), C.int(T)))
+}
+
+// Ink2PAsymKVReady refuses FAK_INKLING2_PREFILL_OLD=attn: the asymmetric caches have only
+// the tensor-core attend, and the float kernel it selects cannot read them.
+func (c *cudaBackend) Ink2PAsymKVReady() error {
+	if !ink2PrefillFast("attn") {
+		return fmt.Errorf("cuda inkling2 prefill attend: fp8k_nvfp4v caches need the tensor-core attend, but FAK_INKLING2_PREFILL_OLD selects the float kernel")
+	}
+	return nil
+}
+
+func (c *cudaBackend) Ink2QKVPostAsym(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow, meta Ink2Ref, p Ink2AttnParams, cap int, cv *Ink2KVConv) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	var conv **C.float
+	var kNorm, vNorm C.float
+	var kn C.int
+	if cv != nil {
+		ptrs := (*[6]*C.float)(C.malloc(C.size_t(6 * unsafe.Sizeof(uintptr(0)))))
+		defer C.free(unsafe.Pointer(ptrs))
+		ptrs[0], ptrs[1], ptrs[2] = c.ink2F(cv.KW), c.ink2F(cv.VW), c.ink2F(cv.KDyn)
+		ptrs[3], ptrs[4], ptrs[5] = c.ink2F(cv.VDyn), c.ink2F(cv.KHist), c.ink2F(cv.VHist)
+		conv = (**C.float)(unsafe.Pointer(ptrs))
+		kNorm, vNorm, kn = C.float(cv.KNorm), C.float(cv.VNorm), C.int(cv.Kn)
+	}
+	return ink2Status("qkv post asym", C.fcuda_ink2_qkv_post_asym(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v),
+		c.ink2F(qclip), c.ink2F(rclip), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		(*C.uint8_t)(c.ink2Ptr(kscale)), (*C.uint8_t)(c.ink2Ptr(vscale)), c.ink2I(overflow), c.ink2F(meta),
+		C.int(p.Heads), C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.float(p.QKClip), C.float(p.RelClip),
+		C.float(p.Eps), ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap), conv, kNorm, vNorm, kn))
+}
+
+func (c *cudaBackend) Ink2AttendAsym(q, r, sinks, relBias, kcache, vcache, kscale, vscale, scores, out, meta Ink2Ref, p Ink2AttnParams, extent, window, cap int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("attend asym", C.fcuda_ink2_attend_asym(c.ink2F(q), c.ink2F(r), c.ink2F(sinks), c.ink2F(relBias),
+		(*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)), (*C.uint8_t)(c.ink2Ptr(kscale)),
+		(*C.uint8_t)(c.ink2Ptr(vscale)), (*C.double)(c.ink2Ptr(scores)), c.ink2F(out), c.ink2F(meta), C.int(p.Heads),
+		C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap), C.float(p.Scale)))
+}
+
+func (c *cudaBackend) Ink2PQKVPostAsym(q, r, k, v, qclip, rclip, kcache, vcache, kscale, vscale, overflow Ink2Ref, p Ink2AttnParams, cap, pos0, T int) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill qkv post asym", C.fcuda_ink2p_qkv_post_asym(c.ink2F(q), c.ink2F(r), c.ink2F(k), c.ink2F(v),
+		c.ink2F(qclip), c.ink2F(rclip), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		(*C.uint8_t)(c.ink2Ptr(kscale)), (*C.uint8_t)(c.ink2Ptr(vscale)), c.ink2I(overflow), C.int(p.Heads),
+		C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.float(p.QKClip), C.float(p.RelClip), C.float(p.Eps),
+		ink2Bool(p.Global), C.float(p.Alpha), C.float(p.Floor), C.int(cap), C.int(pos0), C.int(T)))
+}
+
+func (c *cudaBackend) Ink2PAttendAsym(q, r, sinks, relBias, kcache, vcache, kscale, vscale, out Ink2Ref, p Ink2AttnParams, extent, window, cap, pos0, T int) error {
+	if err := c.Ink2PAsymKVReady(); err != nil {
+		return err
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return ink2Status("prefill attend asym", C.fcuda_ink2p_attend_v2_asym(c.ink2F(q), c.ink2F(r), c.ink2F(sinks),
+		c.ink2F(relBias), (*C.uint8_t)(c.ink2Ptr(kcache)), (*C.uint8_t)(c.ink2Ptr(vcache)),
+		(*C.uint8_t)(c.ink2Ptr(kscale)), (*C.uint8_t)(c.ink2Ptr(vscale)), c.ink2F(out), C.int(p.Heads),
+		C.int(p.KVHeads), C.int(p.HeadDim), C.int(p.RelLen), C.int(extent), C.int(window), C.int(cap),
+		C.float(p.Scale), C.int(pos0), C.int(T)))
 }
 
 func (c *cudaBackend) Ink2SigmoidMul(x, gate Ink2Ref, n int) error {

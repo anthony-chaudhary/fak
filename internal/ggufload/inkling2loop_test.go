@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"context"
 	"errors"
 	"os"
 	"testing"
@@ -286,5 +287,48 @@ func TestInkling2OracleGreedyMatchesLlamaCpp(t *testing.T) {
 				return got, err
 			}, nil)
 		})
+	}
+}
+
+type cancelAfterStepsSession struct {
+	cancelAfter int
+	steps       int
+	cancel      context.CancelFunc
+}
+
+func (s *cancelAfterStepsSession) Prefill(ctx context.Context, _ []int) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return 10, nil
+}
+
+func (s *cancelAfterStepsSession) Step(int) (int, error) {
+	s.steps++
+	if s.steps == s.cancelAfter && s.cancel != nil {
+		s.cancel()
+	}
+	return 10 + s.steps, nil
+}
+
+func (s *cancelAfterStepsSession) Close() error { return nil }
+
+func TestInkling2LoopGreedyContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := Inkling2LoopGreedyContext(ctx, nil, []int{1, 2}, 4); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestInkling2GreedyStepsUntilContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	sess := &cancelAfterStepsSession{cancelAfter: 2, cancel: cancel}
+	_, _, err := inkling2GreedyStepsUntilContext(ctx, sess, []int{1}, 16, 999)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if sess.steps != 2 {
+		t.Fatalf("steps = %d, want 2 (stopped promptly on cancel)", sess.steps)
 	}
 }

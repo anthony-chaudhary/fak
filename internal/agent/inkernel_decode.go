@@ -725,10 +725,11 @@ type decodeLane struct {
 	greedyReady bool
 	vocab       int
 
-	gen     int
-	stopped bool
-	done    bool
-	err     error
+	gen          int
+	stopped      bool
+	done         bool
+	err          error
+	cycleBreaker rollingTokenCycleBreaker
 }
 
 func captureQwen35MetalForwardSequenceReceipt(p *InKernelPlanner, s *model.Session, measurement *nativeInferenceMeasurement) {
@@ -1082,7 +1083,7 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.err, ln.done = err, true
 		return 0, false
 	}
-	if emitStopped {
+	if emitStopped || ln.cycleBreaker.Observe(next) {
 		ln.stopped, ln.done = true, true
 		return 0, false
 	}

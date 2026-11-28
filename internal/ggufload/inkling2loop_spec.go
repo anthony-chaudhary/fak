@@ -338,7 +338,15 @@ func inkling2ResidentSpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt
 // the way inkling2GreedyStepsUntil does, also when eos is an accepted draft token.
 func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int,
 	mk func(*inkling2Resident) (inkling2Drafter, error)) ([]int, Inkling2SpecStats, error) {
+	return inkling2ResidentSpecGreedyUntilContext(context.Background(), m, be, prompt, n, depth, eos, mk)
+}
+
+func inkling2ResidentSpecGreedyUntilContext(ctx context.Context, m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int,
+	mk func(*inkling2Resident) (inkling2Drafter, error)) ([]int, Inkling2SpecStats, error) {
 	var st Inkling2SpecStats
+	if err := ctx.Err(); err != nil {
+		return nil, st, err
+	}
 	s, err := newInkling2ResidentWithSpec(m, be, depth > 0)
 	if err != nil {
 		return nil, st, err
@@ -357,7 +365,7 @@ func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, p
 	if len(prompt) == 0 {
 		return nil, st, fmt.Errorf("inkling2 spec: empty prompt")
 	}
-	next, err := s.prefill(context.Background(), prompt)
+	next, err := s.prefill(ctx, prompt)
 	if err != nil {
 		return nil, st, err
 	}
@@ -389,6 +397,9 @@ func inkling2ResidentSpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, p
 		out = append(out, next)
 		if len(out) == n {
 			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, st, err
 		}
 		t0 := time.Now()
 		props := d.Draft(out, depth)
@@ -490,6 +501,13 @@ func inkling2SpecGreedy(m *Inkling2LoopModel, be compute.Backend, prompt []int, 
 
 // inkling2SpecGreedyUntil is inkling2SpecGreedy stopping at eos.
 func inkling2SpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int) ([]int, Inkling2LoopGreedyStats, error) {
+	return inkling2SpecGreedyUntilContext(context.Background(), m, be, prompt, n, depth, eos)
+}
+
+func inkling2SpecGreedyUntilContext(ctx context.Context, m *Inkling2LoopModel, be compute.Backend, prompt []int, n, depth, eos int) ([]int, Inkling2LoopGreedyStats, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, Inkling2LoopGreedyStats{}, err
+	}
 	if inkling2SpecAutoDisabledForKV(be, os.LookupEnv) {
 		inkling2SpecWarnKVDisable()
 		inkling2LastSpec = Inkling2SpecStats{}
@@ -505,7 +523,7 @@ func inkling2SpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []
 	dflashDir := inkling2DFlash2DirFor(m, be)
 	switch inkling2ResolveSpecDraft(kind, dir, dflashDir) {
 	case inkling2DraftLookup:
-		out, st, err = inkling2ResidentSpecGreedyUntil(m, be, prompt, n, depth, eos, func(*inkling2Resident) (inkling2Drafter, error) {
+		out, st, err = inkling2ResidentSpecGreedyUntilContext(ctx, m, be, prompt, n, depth, eos, func(*inkling2Resident) (inkling2Drafter, error) {
 			return newInkling2LookupDrafter(prompt), nil
 		})
 	case inkling2DraftDSpark:
@@ -518,7 +536,7 @@ func inkling2SpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []
 		}
 		defer dm.Close()
 		depth = min(depth, dm.HP.Block-1)
-		out, st, err = inkling2ResidentSpecGreedyUntil(m, be, prompt, n, depth, eos, func(s *inkling2Resident) (inkling2Drafter, error) {
+		out, st, err = inkling2ResidentSpecGreedyUntilContext(ctx, m, be, prompt, n, depth, eos, func(s *inkling2Resident) (inkling2Drafter, error) {
 			d, err := s.attachDraft(dm)
 			if err == nil {
 				d.steps = depth
@@ -536,7 +554,7 @@ func inkling2SpecGreedyUntil(m *Inkling2LoopModel, be compute.Backend, prompt []
 		defer dm.Close()
 		depth = min(depth, dm.Config.DFlash.Block-1)
 		var dd *ink2DFlash2Draft
-		out, st, err = inkling2ResidentSpecGreedyUntil(m, be, prompt, n, depth, eos, func(s *inkling2Resident) (inkling2Drafter, error) {
+		out, st, err = inkling2ResidentSpecGreedyUntilContext(ctx, m, be, prompt, n, depth, eos, func(s *inkling2Resident) (inkling2Drafter, error) {
 			d, err := s.attachDFlash2(dm)
 			dd = d
 			return inkling2DFlash2Drafter{d}, err

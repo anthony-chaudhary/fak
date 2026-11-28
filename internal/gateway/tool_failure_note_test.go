@@ -161,8 +161,9 @@ func TestToolFailureNoteOnceDedup(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=1s lane=default
+// fak-test:runtime fast est=5ms lane=default
 func TestToolFailureNotesPreservesEarlierCallWhenToolCallIDReused(t *testing.T) {
+	t.Parallel()
 	messages := []agent.Message{
 		{
 			Role: agent.RoleAssistant,

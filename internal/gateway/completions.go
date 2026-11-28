@@ -159,7 +159,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	comp, err := s.completeServed(ctx, sessionTurn, messages, nil,
 		agent.WithModel(req.Model), // no-op when the client omitted model
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
-		agent.WithTemperature(req.Temperature),
+		agent.WithClientTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithSeed(body.Seed),
 		agent.WithStop(normalizeStop(req.Stop)),

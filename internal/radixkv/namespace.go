@@ -36,6 +36,9 @@ package radixkv
 // would change the lease SEAM (Lookup/Insert/Done gaining a session id), rippling into the
 // planner's lease discipline, so it is a separate non-seam-preserving increment. Residency
 // stays the proven single-owner refs counter; only node identity gains the namespace axis.
+// UPDATE (#3727): session-scoped refs, last-holder release, the generation guard and the
+// bounded closed-session tombstone now live in radix_refs.go as a separate counter, with
+// the Lookup/Insert/Done seam unchanged.
 // The evict→reuse thrash side-map (thrash.go) still keys on the token path alone, so two
 // namespaces sharing a token path can at worst count one spurious thrash — that plane is
 // observability-only and never steers victim choice or which K/V is served, so the isolation

@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -9,203 +10,97 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
-const (
-	// inkling2EnvelopeWideChunkFreeBytes is the post-weight free device memory
-	// threshold above which auto-tuning selects DefaultChunk=1024 instead of 512.
-	inkling2EnvelopeWideChunkFreeBytes = int64(6) << 30
-
-	// inkling2EnvelopeMinChunk is the lowest prefill chunk rung used for
-	// step-down under VRAM pressure and for LongCtxC1Threshold sizing.
-	inkling2EnvelopeMinChunk = 128
-)
-
 // Inkling2ServeEnvelope holds the solved serving parameters for an Inkling-2
 // model on a given device memory budget and capability set.
-type Inkling2ServeEnvelope struct {
-	MaxCtx             int
-	DefaultChunk       int
-	MinChunk           int
-	TargetConcurrency  int
-	KVDtype            Inkling2KVDType
-	LongCtxC1Threshold int
-}
+type Inkling2ServeEnvelope = ServeEnvelope
 
 // Inkling2ServeCaps describes the backend kernel and runtime capabilities
 // available for Inkling-2 serving.
-type Inkling2ServeCaps struct {
-	BackendName      string
-	BatchEligible    bool
-	F16Ready         bool
-	FP8Ready         bool
-	FP8KLQualified   bool
-	NVFP4Ready       bool
-	NVFP4KLQualified bool
-	SpecActive       bool
-}
+type Inkling2ServeCaps = ServeCaps
 
 // Inkling2ServeOverrides carries explicit CLI flag and FAK_INKLING2_* env
 // overrides that act as hard pins over solved envelope defaults.
-type Inkling2ServeOverrides struct {
-	RequestedCtx   int              // --native-context-tokens
-	EnvCtx         int              // FAK_INKLING2_CTX
-	KVDtype        *Inkling2KVDType // FAK_INKLING2_BATCH_KV or FAK_INKLING2_KV
-	PrefillChunk   int              // FAK_INKLING2_PREFILL_CHUNK
-	ServeBatchRows int              // FAK_INKLING2_SERVE_BATCH_ROWS
-	BatchDisabled  bool             // FAK_INKLING2_SERVE_BATCH=0/false/off or FAK_INKLING2_BATCH_SEQOPS=0
+type Inkling2ServeOverrides = ServeOverrides
+
+// inkling2DSparkDraftReserveBytes is the conservative device footprint reserved
+// for the DSpark speculative draft weights, tap buffers, and verify logits when
+// speculative decoding is enabled.
+const inkling2DSparkDraftReserveBytes int64 = 384 << 20
+
+// inkling2MemoryBudget adapts model.Inkling2LoopHParams and the exact
+// inkling2loop_resident.go memory formulas to ModelMemoryBudget.
+type inkling2MemoryBudget struct {
+	hp model.Inkling2LoopHParams
+}
+
+func (b inkling2MemoryBudget) Validate() error {
+	if b.hp.Layers <= 0 || b.hp.KVHeads <= 0 || b.hp.HeadDim <= 0 || len(b.hp.LocalLayer) != b.hp.Layers {
+		return fmt.Errorf("inkling2 intent: invalid model hparams (layers=%d kv_heads=%d head_dim=%d local_len=%d)",
+			b.hp.Layers, b.hp.KVHeads, b.hp.HeadDim, len(b.hp.LocalLayer))
+	}
+	return nil
+}
+
+func (b inkling2MemoryBudget) Layers() int {
+	return b.hp.Layers
+}
+
+func (b inkling2MemoryBudget) DeviceHeadroom(freeBytes int64) int64 {
+	return inkling2DeviceHeadroom(freeBytes)
+}
+
+func (b inkling2MemoryBudget) ResidentKVBytes(ctx int, batched bool, chunk int, dtype ServeKVDType) int64 {
+	return inkling2ResidentKVBytesFor(b.hp, ctx, batched, chunk, dtype)
+}
+
+func (b inkling2MemoryBudget) ResidentOtherBytes(chunk int) int64 {
+	return inkling2ResidentOtherBytes(b.hp, inkling2ArenaFloats, chunk, 0)
+}
+
+func (b inkling2MemoryBudget) KVFit(ctx int, batched bool, chunk int, dtype ServeKVDType, other, freeBytes int64) (int64, error) {
+	return inkling2KVFitFor(b.hp, ctx, batched, chunk, dtype, other, freeBytes)
+}
+
+func (b inkling2MemoryBudget) MaxResidentCtx(batched bool, chunk int, dtype ServeKVDType, ceil int, budget int64) int {
+	return inkling2MaxResidentCtxFor(b.hp, batched, chunk, dtype, ceil, budget)
+}
+
+func (b inkling2MemoryBudget) BatchNeedBytes(C, ctx, chunk int, kvDtype ServeKVDType) int64 {
+	return inkling2EnvelopeBatchNeedBytes(b.hp, C, ctx, chunk, kvDtype)
+}
+
+func (b inkling2MemoryBudget) EnvelopeConstraints(backendName string) ServeEnvelopeConstraints {
+	return ServeEnvelopeConstraints{
+		DefaultCtx:             Inkling2LoopResidentContext,
+		MinCtx:                 Inkling2ResidentCtxMin,
+		AutoCtxCeiling:         Inkling2AutoCtxCeiling,
+		ResidentCtxFitMax:      Inkling2ResidentCtxFitMax,
+		HardMaxCtx:             inkling2ResidentHardMax(backendName),
+		MaxBatch:               Inkling2LoopMaxBatch,
+		PrefillChunkBase:       inkling2PrefillChunkBase,
+		PrefillChunkWide:       inkling2PrefillChunkWide,
+		PrefillChunkMetal:      inkling2PrefillChunkMetal,
+		MetalPrefillChunkSteps: inkling2MetalPrefillChunkSteps,
+		BatchChunkLadder:       inkling2BatchChunkLadder,
+		BatchHeadroom:          inkling2BatchHeadroom,
+		BatchCtxAlign:          inkling2BatchCtxAlign,
+		DraftReserveBytes:      inkling2DSparkDraftReserveBytes,
+		SupportsBatchedPrefill: b.hp.Hidden > 0,
+	}
 }
 
 // ResolveInkling2ServeEnvelope computes the unified VRAM-envelope parameters
 // from exact inkling2BatchBytes and inkling2ResidentKVBytesFor math, honoring
 // explicit overrides as hard pins.
 func ResolveInkling2ServeEnvelope(hp model.Inkling2LoopHParams, freeBytes int64, caps Inkling2ServeCaps, overrides Inkling2ServeOverrides) Inkling2ServeEnvelope {
-	kvDtype := resolveEnvelopeKVDtype(caps, overrides)
-
-	knownFree := freeBytes > 0 && freeBytes != compute.FreeUnknown
-	defaultChunk, minChunk := resolveEnvelopeChunk(hp, freeBytes, knownFree, caps, overrides, kvDtype)
-	maxCtx := resolveEnvelopeMaxCtx(hp, freeBytes, knownFree, caps, overrides, kvDtype, defaultChunk)
-	targetC := resolveEnvelopeConcurrency(hp, freeBytes, knownFree, caps, overrides, kvDtype, defaultChunk, maxCtx)
-	c1Thresh := resolveEnvelopeLongCtxC1Threshold(hp, freeBytes, knownFree, caps, overrides, kvDtype, minChunk, maxCtx)
-
-	return Inkling2ServeEnvelope{
-		MaxCtx:             maxCtx,
-		DefaultChunk:       defaultChunk,
-		MinChunk:           minChunk,
-		TargetConcurrency:  targetC,
-		KVDtype:            kvDtype,
-		LongCtxC1Threshold: c1Thresh,
-	}
+	return ResolveServeEnvelope(inkling2MemoryBudget{hp: hp}, freeBytes, caps, overrides)
 }
 
-func resolveEnvelopeKVDtype(caps Inkling2ServeCaps, overrides Inkling2ServeOverrides) Inkling2KVDType {
-	if overrides.KVDtype != nil {
-		return *overrides.KVDtype
-	}
-	if caps.SpecActive {
-		return Inkling2KVF32
-	}
-	if caps.NVFP4Ready && caps.NVFP4KLQualified {
-		return Inkling2KVNVFP4
-	}
-	if caps.FP8Ready && caps.FP8KLQualified {
-		return Inkling2KVFP8
-	}
-	if caps.F16Ready {
-		return Inkling2KVF16
-	}
-	return Inkling2KVF32
-}
-
-func resolveEnvelopeChunk(hp model.Inkling2LoopHParams, freeBytes int64, knownFree bool, caps Inkling2ServeCaps, overrides Inkling2ServeOverrides, kvDtype Inkling2KVDType) (defChunk, minChunk int) {
-	if overrides.PrefillChunk > 0 {
-		return overrides.PrefillChunk, min(overrides.PrefillChunk, inkling2EnvelopeMinChunk)
-	}
-	if caps.BackendName == "metal" {
-		if !knownFree {
-			return inkling2PrefillChunkMetal, inkling2PrefillChunkBase
-		}
-		for _, c := range inkling2MetalPrefillChunkSteps {
-			if inkling2EnvelopeBatchFits(hp, 1, Inkling2LoopResidentContext, c, kvDtype, freeBytes) {
-				return c, inkling2PrefillChunkBase
-			}
-		}
-		return inkling2PrefillChunkBase, inkling2PrefillChunkBase
-	}
-	if !knownFree {
-		return inkling2PrefillChunkBase, inkling2EnvelopeMinChunk
-	}
-	want := inkling2PrefillChunkBase
-	if freeBytes >= inkling2EnvelopeWideChunkFreeBytes {
-		want = inkling2PrefillChunkWide
-	}
-	for _, c := range inkling2BatchChunkLadder(want) {
-		if inkling2EnvelopeBatchFits(hp, 1, Inkling2LoopResidentContext, c, kvDtype, freeBytes) {
-			return c, inkling2EnvelopeMinChunk
-		}
-	}
-	return inkling2EnvelopeMinChunk, inkling2EnvelopeMinChunk
-}
-
-func resolveEnvelopeMaxCtx(hp model.Inkling2LoopHParams, freeBytes int64, knownFree bool, caps Inkling2ServeCaps, overrides Inkling2ServeOverrides, kvDtype Inkling2KVDType, defaultChunk int) int {
-	if overrides.RequestedCtx > 0 {
-		if hard := inkling2ResidentHardMax(caps.BackendName); hard > 0 && overrides.RequestedCtx > hard {
-			return hard
-		}
-		return overrides.RequestedCtx
-	}
-	if overrides.EnvCtx > 0 {
-		return overrides.EnvCtx
-	}
-	if !knownFree {
-		return Inkling2LoopResidentContext
-	}
-	ceiling := Inkling2AutoCtxCeiling
-	if kvDtype != Inkling2KVF32 && freeBytes >= 8<<30 {
-		ceiling = Inkling2ResidentCtxFitMax
-	}
-	if hard := inkling2ResidentHardMax(caps.BackendName); hard > 0 && ceiling > hard {
-		ceiling = hard
-	}
-
-	batched := caps.BatchEligible && !overrides.BatchDisabled
-	prefillChunk := 0
-	if batched && hp.Hidden > 0 {
-		prefillChunk = max(defaultChunk, inkling2PrefillChunkBase)
-	}
-	other := inkling2ResidentOtherBytes(hp, inkling2ArenaFloats, prefillChunk, 0)
-	budget := freeBytes - inkling2DeviceHeadroom(freeBytes)
-	left := budget - other
-	var fit int
-	if left > 0 {
-		fit = inkling2MaxResidentCtxFor(hp, batched, prefillChunk, kvDtype, ceiling, left)
-		fit = fit / 256 * 256
-	}
-	if fit < Inkling2ResidentCtxMin {
-		return Inkling2LoopResidentContext
-	}
-	return max(Inkling2LoopResidentContext, min(fit, ceiling))
-}
-
-func resolveEnvelopeConcurrency(hp model.Inkling2LoopHParams, freeBytes int64, knownFree bool, caps Inkling2ServeCaps, overrides Inkling2ServeOverrides, kvDtype Inkling2KVDType, defaultChunk, maxCtx int) int {
-	if overrides.ServeBatchRows > 0 {
-		return min(overrides.ServeBatchRows, Inkling2LoopMaxBatch)
-	}
-	if !caps.BatchEligible || overrides.BatchDisabled {
-		return 1
-	}
-	if !knownFree {
-		return 1
-	}
-	refCtx := min(maxCtx, Inkling2AutoCtxCeiling)
-	best := 1
-	for c := Inkling2LoopMaxBatch; c >= 2; c-- {
-		if inkling2EnvelopeBatchFits(hp, c, refCtx, defaultChunk, kvDtype, freeBytes) {
-			best = c
-			break
-		}
-	}
-	return best
-}
-
-func resolveEnvelopeLongCtxC1Threshold(hp model.Inkling2LoopHParams, freeBytes int64, knownFree bool, caps Inkling2ServeCaps, overrides Inkling2ServeOverrides, kvDtype Inkling2KVDType, minChunk, maxCtx int) int {
-	if !caps.BatchEligible || overrides.BatchDisabled {
-		return 0
-	}
-	if !knownFree {
-		return maxCtx
-	}
-	if inkling2EnvelopeBatchFits(hp, 2, maxCtx, minChunk, kvDtype, freeBytes) {
-		return maxCtx
-	}
-	lo, hi := 0, maxCtx
-	for lo < hi {
-		mid := lo + (hi-lo+1)/2
-		if inkling2EnvelopeBatchFits(hp, 2, mid, minChunk, kvDtype, freeBytes) {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	return lo / inkling2BatchCtxAlign * inkling2BatchCtxAlign
+// inkling2EnvelopeBatchFits reports whether C concurrent sequences at ctx and
+// chunk fit within freeBytes including batch headroom.
+func inkling2EnvelopeBatchFits(hp model.Inkling2LoopHParams, C, ctx, chunk int, kvDtype Inkling2KVDType, freeBytes int64) bool {
+	b := inkling2MemoryBudget{hp: hp}
+	return serveEnvelopeBatchFits(b, b.EnvelopeConstraints(""), C, ctx, chunk, kvDtype, freeBytes)
 }
 
 // inkling2EnvelopeBatchNeedBytes prices C concurrent sequences at ctx tokens and
@@ -228,14 +123,6 @@ func inkling2EnvelopeBatchNeedBytes(hp model.Inkling2LoopHParams, C, ctx, chunk 
 		need += 4 * (int64(pKeep) + int64(pScr))
 	}
 	return need
-}
-
-func inkling2EnvelopeBatchFits(hp model.Inkling2LoopHParams, C, ctx, chunk int, kvDtype Inkling2KVDType, freeBytes int64) bool {
-	if freeBytes <= 0 || freeBytes == compute.FreeUnknown {
-		return false
-	}
-	need := inkling2EnvelopeBatchNeedBytes(hp, C, ctx, chunk, kvDtype)
-	return need+inkling2BatchHeadroom <= freeBytes
 }
 
 // Inkling2ServeCapsFromBackend inspects m, be, and lookup to build Inkling2ServeCaps.
@@ -338,18 +225,11 @@ func ResolveInkling2ServeEnvelopeFor(m *Inkling2LoopModel, be compute.Backend, r
 }
 
 func inkling2ParseKVDTypeToken(v string) (Inkling2KVDType, bool) {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "nvfp4", "fp4", "e2m1":
-		return Inkling2KVNVFP4, true
-	case "fp8", "e4m3", "e4m3fn":
-		return Inkling2KVFP8, true
-	case "f16", "fp16":
-		return Inkling2KVF16, true
-	case "f32", "fp32":
-		return Inkling2KVF32, true
-	default:
+	dt, ok := ParseServeKVDTypeToken(v)
+	if !ok || dt == Inkling2KVAsym {
 		return Inkling2KVF32, false
 	}
+	return dt, true
 }
 
 func inkling2ServeEnvOptOut(lookup func(string) (string, bool), key string) bool {

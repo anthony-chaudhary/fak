@@ -1577,6 +1577,11 @@
           "category": "incidental",
           "reason": "Pinned upstream vLLM source-file stem cited for provenance, not the name of a new FAK cache abstraction.",
           "token": "fused_qknorm_rope_cache_kernel"
+        },
+        {
+          "category": "incidental",
+          "reason": "InKernelPlanner.PrimeCacheState method from CW-03 (#13351) is the production cache-populate entrypoint; reused by next-turn KV prime (#3728) without introducing a new cache tier.",
+          "token": "PrimeCacheState"
         }
       ],
       "exclude": [
@@ -1661,6 +1666,7 @@
         "OpCacheLoad",
         "OrgPolicyCachePath",
         "OrgPolicyCachePathEnv",
+        "PrimeCacheState",
         "ProviderCacheWriteTokens",
         "ProviderCalibration",
         "Qwen38DefaultAlias",
@@ -9324,49 +9330,49 @@
           "token": "FlashMLAWitness"
         },
         {
-          "token": "witnessSnapshotPoolPrefix",
           "category": "incidental",
-          "reason": "Unexported pool-namespace constant of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported pool-namespace constant of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept.",
+          "token": "witnessSnapshotPoolPrefix"
         },
         {
-          "token": "witnessSnapshotObserverKey",
           "category": "incidental",
-          "reason": "Unexported context key of the positioned WithWitnessSnapshotObserver option; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported context key of the positioned WithWitnessSnapshotObserver option; local implementation detail, not a separate witness-proof concept.",
+          "token": "witnessSnapshotObserverKey"
         },
         {
-          "token": "witnessSnapshotGitRunner",
           "category": "incidental",
-          "reason": "Unexported git-runner factory of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported git-runner factory of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept.",
+          "token": "witnessSnapshotGitRunner"
         },
         {
-          "token": "discardWitnessSnapshot",
           "category": "incidental",
-          "reason": "Unexported release method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported release method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept.",
+          "token": "discardWitnessSnapshot"
         },
         {
-          "token": "validateWitnessSnapshot",
           "category": "incidental",
-          "reason": "Unexported validation method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported validation method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept.",
+          "token": "validateWitnessSnapshot"
         },
         {
-          "token": "witnessSnapshotUnavailablePath",
           "category": "incidental",
-          "reason": "Unexported scratch-path helper of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported scratch-path helper of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept.",
+          "token": "witnessSnapshotUnavailablePath"
         },
         {
-          "token": "beginWitnessSnapshotMutation",
           "category": "incidental",
-          "reason": "Unexported mutation-guard helper of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported mutation-guard helper of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept.",
+          "token": "beginWitnessSnapshotMutation"
         },
         {
-          "token": "witnessSnapshotParent",
           "category": "incidental",
-          "reason": "Unexported parent-resolution method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept."
+          "reason": "Unexported parent-resolution method of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate witness-proof concept.",
+          "token": "witnessSnapshotParent"
         },
         {
-          "token": "witness_snapshots",
           "category": "incidental",
-          "reason": "Evidence label in the worker-land symptom detail string; a reporting token, not a separate witness-proof concept."
+          "reason": "Evidence label in the worker-land symptom detail string; a reporting token, not a separate witness-proof concept.",
+          "token": "witness_snapshots"
         }
       ],
       "id": "witness-proof",
@@ -13308,6 +13314,21 @@
           "category": "incidental",
           "reason": "P/D q4k arm's context-budget parameter spelling (cmd/fak/serve_pd.go loadServePDQ4KModelPlaced); the context-token-budget concept is already positioned in the context-ctx family, no new concept",
           "token": "ctxtokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Explicit caller-requested context field on ServeOverrides (promoted from internal/ggufload ServeOverrides); carries CLI/request context override rather than defining a new context abstraction.",
+          "token": "RequestedCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment override context field on ServeOverrides (promoted from internal/ggufload ServeOverrides); carries parsed env context override rather than defining a new context abstraction.",
+          "token": "envCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Lower-bound context constraint field on ServeEnvelopeConstraints (promoted from internal/ggufload); constrains the existing ServeEnvelope solver rather than introducing a new context concept.",
+          "token": "MinCtx"
         }
       ],
       "exclude": [
@@ -13353,6 +13374,7 @@
         "MaxContextTokensForBudget",
         "MechanismStaleContext",
         "MetricFactRecall",
+        "MinCtx",
         "NativeCompactionObservation",
         "NewContextLayerMemo",
         "PackedContextSource",
@@ -13362,6 +13384,7 @@
         "RenderIncrementalContext",
         "RenderInvariantPrefix",
         "ReplaceIncrementalContext",
+        "RequestedCtx",
         "RestoreCalls",
         "RetainedContextBytes",
         "RuntimeContextChanged",
@@ -13433,6 +13456,7 @@
         "ctxtokens",
         "dflash2ContextKV",
         "engramLookAheadContext",
+        "envCtx",
         "fabric_context",
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
@@ -16881,9 +16905,9 @@
           "token": "materializeQwen35State"
         },
         {
-          "token": "executionMaterializerKey",
           "category": "incidental",
-          "reason": "Unexported context key of the positioned WithExecutionMaterializer option; local implementation detail, not a separate render-materialize concept."
+          "reason": "Unexported context key of the positioned WithExecutionMaterializer option; local implementation detail, not a separate render-materialize concept.",
+          "token": "executionMaterializerKey"
         }
       ],
       "id": "render-materialize",
@@ -18348,6 +18372,11 @@
           "category": "incidental",
           "reason": "P/D q4k arm's device memory-plan local (cmd/fak/serve_pd.go loadServePDQ4KModelPlaced); the serve device-plan concept is already positioned in the plan family, no new concept",
           "token": "memplan"
+        },
+        {
+          "category": "incidental",
+          "reason": "ReuseCandidate is the radixkv span input consumed by ComposeReusePlan and produced by the fingerprint matcher; it feeds the reuse-plan concept already positioned in the plan family, not a second plan.",
+          "token": "reusecandidate"
         }
       ],
       "exclude": [
@@ -18598,6 +18627,7 @@
         "requestMemoryPlanWithExtras",
         "requestedExecutionPlan",
         "resolvedStrixCandidate",
+        "reusecandidate",
         "rollbackCodexMarketplaceCandidate",
         "runAblatePlan",
         "runContinuitySyncPlan",
@@ -19130,34 +19160,34 @@
           "token": "checkedTokenCapacity"
         },
         {
-          "token": "witnessSnapshotPoolPrefix",
           "category": "incidental",
-          "reason": "Unexported pool-namespace constant of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate pool concept."
+          "reason": "Unexported pool-namespace constant of the positioned AcquireWitnessSnapshot provider; local implementation detail, not a separate pool concept.",
+          "token": "witnessSnapshotPoolPrefix"
         },
         {
-          "token": "poolPrefix",
           "category": "incidental",
-          "reason": "Unexported pool-namespace field of the land candidate topology session; local implementation detail, not a separate pool concept."
+          "reason": "Unexported pool-namespace field of the land candidate topology session; local implementation detail, not a separate pool concept.",
+          "token": "poolPrefix"
         },
         {
-          "token": "livePoolCountPrefix",
           "category": "incidental",
-          "reason": "Unexported pool-count helper of the land candidate topology session; local implementation detail, not a separate pool concept."
+          "reason": "Unexported pool-count helper of the land candidate topology session; local implementation detail, not a separate pool concept.",
+          "token": "livePoolCountPrefix"
         },
         {
-          "token": "poolName",
           "category": "incidental",
-          "reason": "Unexported pool-name accessor of the land candidate topology session; local implementation detail, not a separate pool concept."
+          "reason": "Unexported pool-name accessor of the land candidate topology session; local implementation detail, not a separate pool concept.",
+          "token": "poolName"
         },
         {
-          "token": "poolMarkerStale",
           "category": "incidental",
-          "reason": "Unexported pool-marker staleness check of the land candidate topology session; local implementation detail, not a separate pool concept."
+          "reason": "Unexported pool-marker staleness check of the land candidate topology session; local implementation detail, not a separate pool concept.",
+          "token": "poolMarkerStale"
         },
         {
-          "token": "trimPoolExcessPrefix",
           "category": "incidental",
-          "reason": "Unexported pool-cap self-heal helper of the land candidate topology session; local implementation detail, not a separate pool concept."
+          "reason": "Unexported pool-cap self-heal helper of the land candidate topology session; local implementation detail, not a separate pool concept.",
+          "token": "trimPoolExcessPrefix"
         }
       ],
       "exclude": [
